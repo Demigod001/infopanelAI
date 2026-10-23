@@ -253,42 +253,55 @@ namespace InfoPanel.Drawing
 
         private void DrawStringCore(string text, string fontName, string fontStyle, int fontSize, string color, int x, int y, bool rightAlign, bool centerAlign, bool bold, bool italic, bool underline, bool strikeout, bool wrap, bool ellipsis, int width)
         {
-            var tb = new TextBlock
-            {
-                EllipsisEnabled = ellipsis,
-                MaxLines = wrap ? 1 : null,
-                MaxWidth = width > 0 ? width : null
-            };
-
+            var alignment = TextAlignment.Auto;
             if (rightAlign)
-                tb.Alignment = TextAlignment.Right;
-
+                alignment = TextAlignment.Right;
             if (centerAlign && width > 0)
-                tb.Alignment = TextAlignment.Center;
+                alignment = TextAlignment.Center;
 
             SKTypeface typeface = CreateTypeface(fontName, fontStyle, bold, italic);
 
-            var style = new Style
-            {
-                FontFamily = typeface.FamilyName,
-                FontSize = fontSize * FontScale,
-                FontWeight = typeface.FontWeight,
-                FontItalic = typeface.IsItalic,
-                FontWidth = (SKFontStyleWidth)typeface.FontWidth,
-                TextColor = SKColor.Parse(color),
-                Underline = underline ? UnderlineStyle.Solid : UnderlineStyle.None,
-                StrikeThrough = strikeout ? StrikeThroughStyle.Solid : StrikeThroughStyle.None
-            };
+            var key = new TextLayoutCache.Key(text, typeface, fontSize * FontScale, SKColor.Parse(color),
+                underline, strikeout, ellipsis, wrap, width, alignment);
 
-            tb.AddText(text, style);
+            // Reuse the laid-out block from earlier frames instead of re-shaping identical text every frame.
+            var tb = TextLayoutCache.GetOrCreate(key, BuildTextBlock);
 
             float adjustedX = x;
             if (width == 0 && rightAlign)
                 adjustedX = x - tb.MeasuredWidth;
-            else if (width > 0 && centerAlign)
-                adjustedX = x;
 
-            tb.Paint(Canvas, new SKPoint(adjustedX, y));
+            // The block can be shared with other render threads (overlay, USB panels, web server).
+            lock (tb)
+            {
+                tb.Paint(Canvas, new SKPoint(adjustedX, y));
+            }
+        }
+
+        private static TextBlock BuildTextBlock(TextLayoutCache.Key key)
+        {
+            var tb = new TextBlock
+            {
+                EllipsisEnabled = key.Ellipsis,
+                MaxLines = key.Wrap ? 1 : null,
+                MaxWidth = key.Width > 0 ? key.Width : null,
+                Alignment = key.Alignment
+            };
+
+            var style = new Style
+            {
+                FontFamily = key.Typeface.FamilyName,
+                FontSize = key.FontSize,
+                FontWeight = key.Typeface.FontWeight,
+                FontItalic = key.Typeface.IsItalic,
+                FontWidth = (SKFontStyleWidth)key.Typeface.FontWidth,
+                TextColor = key.Color,
+                Underline = key.Underline ? UnderlineStyle.Solid : UnderlineStyle.None,
+                StrikeThrough = key.Strikeout ? StrikeThroughStyle.Solid : StrikeThroughStyle.None
+            };
+
+            tb.AddText(key.Text, style);
+            return tb;
         }
 
         private static readonly ConcurrentDictionary<string, SKTypeface> _typefaceCache = [];
@@ -849,25 +862,11 @@ namespace InfoPanel.Drawing
         {
             SKTypeface typeface = CreateTypeface(fontName, fontStyle, bold, italic);
 
-            var tb = new TextBlock
-            {
-                EllipsisEnabled = ellipsis,
-                MaxLines = wrap ? 1 : null,
-                MaxWidth = width > 0 ? width : null
-            };
+            // Colour does not affect size; a fixed colour lets measurements share cache entries.
+            var key = new TextLayoutCache.Key(text, typeface, fontSize * FontScale, SKColors.Black,
+                underline, strikeout, ellipsis, wrap, width, TextAlignment.Auto);
 
-            var style = new Style
-            {
-                FontFamily = typeface.FamilyName,
-                FontSize = fontSize * FontScale,
-                FontWeight = typeface.FontWeight,
-                FontItalic = typeface.IsItalic,
-                FontWidth = (SKFontStyleWidth)typeface.FontWidth,
-                Underline = underline ? UnderlineStyle.Solid : UnderlineStyle.None,
-                StrikeThrough = strikeout ? StrikeThroughStyle.Solid : StrikeThroughStyle.None
-            };
-
-            tb.AddText(text, style);
+            var tb = TextLayoutCache.GetOrCreate(key, BuildTextBlock);
 
             return (width == 0 ? tb.MeasuredWidth : width, tb.MeasuredHeight);
         }
