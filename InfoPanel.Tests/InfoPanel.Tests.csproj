@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Portable tests. Directory.Build.props would otherwise pin win-x64. -->
+    <RuntimeIdentifier></RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\InfoPanel\Utils\VersionComparison.cs" Link="VersionComparison.cs" />
+    <Compile Include="..\InfoPanel\Models\SettingsCopy.cs" Link="SettingsCopy.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
+  </ItemGroup>
+
+  <!-- vstest launches testhost.dll as a framework-dependent app. The Test SDK does not
+       always emit testhost.runtimeconfig.json, and without it the runner waits until it times out. -->
+  <Target Name="WriteTestHostRuntimeConfig" AfterTargets="Build">
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).runtimeconfig.json"
+          DestinationFiles="$(OutputPath)testhost.runtimeconfig.json"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(OutputPath)$(AssemblyName).runtimeconfig.json')" />
+  </Target>
+
+</Project>

@@ -19,6 +19,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "InfoPanel.Plugins.Host", "I
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "InfoPanel.Plugins.Graphics", "InfoPanel.Plugins.Graphics\InfoPanel.Plugins.Graphics.csproj", "{C3D4E5F6-A7B8-9012-CDEF-123456789012}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "InfoPanel.Tests", "InfoPanel.Tests\InfoPanel.Tests.csproj", "{D4E5F6A7-B8C9-4012-DEF0-234567890123}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InfoPanel.Views.Skia", "InfoPanel.Views.Skia\InfoPanel.Views.Skia.csproj", "{F0B6B536-4B2D-4E98-9D6E-950F9AD7F0A4}"
 EndProject
 Global
@@ -59,6 +61,10 @@ Global
 		{C3D4E5F6-A7B8-9012-CDEF-123456789012}.Debug|x64.Build.0 = Debug|x64
 		{C3D4E5F6-A7B8-9012-CDEF-123456789012}.Release|x64.ActiveCfg = Release|x64
 		{C3D4E5F6-A7B8-9012-CDEF-123456789012}.Release|x64.Build.0 = Release|x64
+		{D4E5F6A7-B8C9-4012-DEF0-234567890123}.Debug|x64.ActiveCfg = Debug|x64
+		{D4E5F6A7-B8C9-4012-DEF0-234567890123}.Debug|x64.Build.0 = Debug|x64
+		{D4E5F6A7-B8C9-4012-DEF0-234567890123}.Release|x64.ActiveCfg = Release|x64
+		{D4E5F6A7-B8C9-4012-DEF0-234567890123}.Release|x64.Build.0 = Release|x64
 		{F0B6B536-4B2D-4E98-9D6E-950F9AD7F0A4}.Debug|x64.ActiveCfg = Debug|x64
 		{F0B6B536-4B2D-4E98-9D6E-950F9AD7F0A4}.Debug|x64.Build.0 = Debug|x64
 		{F0B6B536-4B2D-4E98-9D6E-950F9AD7F0A4}.Release|x64.ActiveCfg = Release|x64

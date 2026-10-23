@@ -175,6 +175,8 @@ namespace InfoPanel
         [DllImport("user32.dll")]
         static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+        private static bool _sentryEnabled;
+
         public App()
         {
             DispatcherUnhandledException += App_DispatcherUnhandledException;
@@ -185,24 +187,45 @@ namespace InfoPanel
             // 2. Handle unobserved task exceptions (async/await without proper handling)
             TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
 
+            InitCrashReporting();
+        }
+
+        /// <summary>
+        /// Crash reporting is off unless INFOPANEL_SENTRY_DSN is set to your own Sentry project.
+        /// The previous build sent every crash to the upstream author's project.
+        /// </summary>
+        private static void InitCrashReporting()
+        {
+            var dsn = Environment.GetEnvironmentVariable("INFOPANEL_SENTRY_DSN");
+            if (string.IsNullOrWhiteSpace(dsn))
+            {
+                Log.Information("Crash reporting is off. Set INFOPANEL_SENTRY_DSN to send crashes to your own Sentry project.");
+                return;
+            }
+
             SentrySdk.Init(o =>
             {
-                o.Dsn = "https://5ca30f9d2faba70d50918db10cee0d26@o4508414465146880.ingest.us.sentry.io/4508414467833856";
-                o.Debug = true;
+                o.Dsn = dsn;
+                o.Debug = false;
                 o.AutoSessionTracking = true;
-
-                // Add Sentry-specific options
-                o.SendDefaultPii = true; // Include user info
-                o.AttachStacktrace = true; // Always attach stack traces
-                o.Environment = "production"; // or "development"
-                o.Release = Utils.VersionHelper.AppVersion;
+                o.SendDefaultPii = false;
+                o.AttachStacktrace = true;
+                o.Release = VersionHelper.AppVersion;
             });
+            _sentryEnabled = true;
+            Log.Information("Crash reporting enabled for {Release}", VersionHelper.AppVersion);
+        }
+
+        private static void CaptureException(Exception exception, string breadcrumb)
+        {
+            if (!_sentryEnabled) return;
+            SentrySdk.AddBreadcrumb(breadcrumb, "error");
+            SentrySdk.CaptureException(exception);
         }
 
         void App_DispatcherUnhandledException(object? sender, DispatcherUnhandledExceptionEventArgs e)
         {
-            SentrySdk.AddBreadcrumb("WPF Dispatcher unhandled exception", "error");
-            SentrySdk.CaptureException(e.Exception);
+            CaptureException(e.Exception, "WPF Dispatcher unhandled exception");
 
             // Log locally as well
             Logger.Error(e.Exception, "DispatcherUnhandledException occurred");
@@ -215,31 +238,28 @@ namespace InfoPanel
         {
             var exception = e.ExceptionObject as Exception ?? new Exception($"Non-exception thrown: {e.ExceptionObject}");
 
-            SentrySdk.AddBreadcrumb($"AppDomain unhandled exception (IsTerminating: {e.IsTerminating})", "error");
-            SentrySdk.CaptureException(exception);
+            CaptureException(exception, $"AppDomain unhandled exception (IsTerminating: {e.IsTerminating})");
 
             Logger.Fatal(exception, "CurrentDomain_UnhandledException occurred. IsTerminating: {IsTerminating}", e.IsTerminating);
 
-            // Flush Sentry before potential termination
-            SentrySdk.FlushAsync(TimeSpan.FromSeconds(5)).Wait();
+            if (_sentryEnabled)
+                SentrySdk.FlushAsync(TimeSpan.FromSeconds(5)).Wait();
         }
 
         void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
         {
-            SentrySdk.AddBreadcrumb("Unobserved task exception", "error");
-
             // Handle aggregate exceptions
             if (e.Exception is AggregateException agg)
             {
                 foreach (var innerEx in agg.InnerExceptions)
                 {
-                    SentrySdk.CaptureException(innerEx);
+                    CaptureException(innerEx, "Unobserved task exception");
                     Logger.Error(innerEx, "TaskScheduler_UnobservedTaskException: Unobserved task exception in aggregate");
                 }
             }
             else
             {
-                SentrySdk.CaptureException(e.Exception);
+                CaptureException(e.Exception, "Unobserved task exception");
                 Logger.Error(e.Exception, "TaskScheduler_UnobservedTaskException: Unobserved task exception");
             }
 

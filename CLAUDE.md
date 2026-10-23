@@ -43,7 +43,7 @@ InfoPanel is a WPF desktop application built on .NET 8.0 that displays hardware 
 | **InfoPanel.Plugins.Simulator** | Test harness for plugin development |
 | **InfoPanel.Extras** | Built-in plugins (system info, network, drives, weather) |
 
-> **Local DLL references:** LibreHardwareMonitor DLLs are referenced from `../LibreHardwareMonitor/` relative to the repo root. FlyleafLib.dll is referenced from `../libs/` (custom build with headless renderer fix). Ensure that sibling repos/directories are present when building.
+> **Local DLL references:** LibreHardwareMonitor comes from the `LibreHardwareMonitorLib` NuGet package (there is no vendored DLL; the old HintPath pointed at a file that is not in the repo). FlyleafLib.dll is the custom build in `InfoPanel/Lib/` (headless renderer fix). The Turing/Trofeo driver DLLs are vendored in the same folder.
 
 ### Application Startup
 
@@ -189,7 +189,7 @@ GitHub Actions workflow: `.github/workflows/dotnet-desktop.yml`
 - **x64 only** — `<Platforms>x64</Platforms>` is set in all csproj files
 - Warning level 6 and nullable reference types are enabled
 - `AllowUnsafeBlocks` is enabled for performance-critical code
-- No unit test projects currently exist
+- `InfoPanel.Tests` covers version comparison and settings copy. It does not reference the WPF app, so it runs with `dotnet test InfoPanel.Tests/InfoPanel.Tests.csproj` on any OS
 - Plugins are loaded from the `plugins` directory at runtime
 
 ## API Client

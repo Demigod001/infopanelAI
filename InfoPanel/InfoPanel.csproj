@@ -81,9 +81,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<Reference Include="LibreHardwareMonitorLib">
-			<HintPath>Lib\LibreHardwareMonitorLib.dll</HintPath>
-		</Reference>
 		<Reference Include="TuringSmartScreenLib">
 			<HintPath>Lib\TuringSmartScreenLib.dll</HintPath>
 		</Reference>

@@ -83,7 +83,7 @@ public sealed class UpdateChecker
             var releases = await JsonSerializer.DeserializeAsync<List<GitHubRelease>>(stream) ?? [];
 
             var versions = releases
-                .Where(r => !r.Draft && !string.IsNullOrWhiteSpace(r.TagName) && TryParseVersion(r.TagName, out _))
+                .Where(r => !r.Draft && !string.IsNullOrWhiteSpace(r.TagName) && VersionComparison.CanParse(r.TagName))
                 .Select(r => new VersionEntry
                 {
                     Version = r.TagName!.StartsWith('v') ? r.TagName : $"v{r.TagName}",
@@ -93,12 +93,16 @@ public sealed class UpdateChecker
                 })
                 // Only offer releases that can actually be installed and verified.
                 .Where(v => v.DownloadUrl != null && v.ChecksumUrl != null)
-                .OrderByDescending(v => v.Version, Comparer<string>.Create(CompareVersions))
+                .OrderByDescending(v => v.Version, Comparer<string>.Create(VersionComparison.Compare))
                 .ToList();
 
             Versions = versions;
 
-            var latest = versions.FirstOrDefault();
+            var currentVersion = VersionHelper.AppVersion;
+
+            // Stable installs never see prereleases. The list is newest-first, so the first
+            // eligible entry is the release this install should be told about.
+            var latest = versions.FirstOrDefault(v => VersionComparison.IsEligibleRelease(v.Version, currentVersion));
             if (latest != null)
             {
                 LatestVersion = new VersionModel
@@ -110,8 +114,7 @@ public sealed class UpdateChecker
                     ChangelogItems = latest.ChangelogItems
                 };
 
-                var currentVersion = VersionHelper.AppVersion;
-                UpdateAvailable = IsNewerVersion(latest.Version, currentVersion);
+                UpdateAvailable = VersionComparison.IsOfferedUpdate(latest.Version, currentVersion);
 
                 if (UpdateAvailable)
                 {
@@ -175,67 +178,9 @@ public sealed class UpdateChecker
         }
     }
 
-    internal static bool IsNewerVersion(string latest, string current)
-    {
-        return CompareVersions(latest, current) > 0;
-    }
+    internal static bool IsNewerVersion(string latest, string current) => VersionComparison.IsNewer(latest, current);
 
-    /// <summary>
-    /// Semantic-version comparison. The previous version only compared the numeric part and treated any two
-    /// prereleases of the same version as equal, so e.g. 1.4.0-preview.4 was never offered over preview.3.
-    /// </summary>
-    internal static int CompareVersions(string a, string b)
-    {
-        var (aBase, aPre) = SplitVersion(a);
-        var (bBase, bPre) = SplitVersion(b);
-
-        var hasA = Version.TryParse(aBase, out var aVersion);
-        var hasB = Version.TryParse(bBase, out var bVersion);
-        if (!hasA || !hasB) return hasA.CompareTo(hasB);
-
-        var cmp = aVersion!.CompareTo(bVersion);
-        if (cmp != 0) return cmp;
-
-        // Same numeric version: a stable release is newer than any prerelease of it.
-        if (aPre == null && bPre == null) return 0;
-        if (aPre == null) return 1;
-        if (bPre == null) return -1;
-
-        // Compare prerelease identifiers left to right; numeric parts numerically.
-        var aParts = aPre.Split('.');
-        var bParts = bPre.Split('.');
-        for (int i = 0; i < Math.Min(aParts.Length, bParts.Length); i++)
-        {
-            var aIsNum = long.TryParse(aParts[i], out var aNum);
-            var bIsNum = long.TryParse(bParts[i], out var bNum);
-
-            int partCmp = (aIsNum, bIsNum) switch
-            {
-                (true, true) => aNum.CompareTo(bNum),
-                (true, false) => -1,
-                (false, true) => 1,
-                _ => string.CompareOrdinal(aParts[i], bParts[i])
-            };
-
-            if (partCmp != 0) return partCmp;
-        }
-
-        return aParts.Length.CompareTo(bParts.Length);
-    }
-
-    private static bool TryParseVersion(string version, out Version? parsed)
-    {
-        return Version.TryParse(SplitVersion(version).baseVersion, out parsed);
-    }
-
-    private static (string baseVersion, string? prerelease) SplitVersion(string version)
-    {
-        version = version.TrimStart('v', 'V');
-        var plus = version.IndexOf('+');
-        if (plus >= 0) version = version[..plus];
-        var idx = version.IndexOf('-');
-        return idx >= 0 ? (version[..idx], version[(idx + 1)..]) : (version, null);
-    }
+    internal static int CompareVersions(string a, string b) => VersionComparison.Compare(a, b);
 
     public class VersionEntry
     {

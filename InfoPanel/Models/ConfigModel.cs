@@ -638,80 +638,15 @@ namespace InfoPanel
                     {
                         lock (_settingsLock)
                         {
-                            Settings.UiWidth = settings.UiWidth;
-                            Settings.UiHeight = settings.UiHeight;
-                            Settings.UiScale = settings.UiScale;
-                            Settings.AppTheme = settings.AppTheme;
-                            Settings.IsPaneOpen = settings.IsPaneOpen;
-                            Settings.AutoStart = settings.AutoStart;
-                            Settings.AutoStartDelay = settings.AutoStartDelay;
-                            Settings.StartMinimized = settings.StartMinimized;
-                            Settings.MinimizeToTray = settings.MinimizeToTray;
-                            Settings.CloseToMinimize = settings.CloseToMinimize;
+                            // Copies every public setting. Collections are get-only and replaced below.
+                            SettingsCopy.CopySettableProperties(Settings, settings);
+                            Settings.AutosaveIdleSeconds = Math.Clamp(Settings.AutosaveIdleSeconds, 1, 60);
 
-                            Settings.SelectedItemColor = settings.SelectedItemColor;
-                            Settings.ShowGridLines = settings.ShowGridLines;
-                            Settings.GridLinesColor = settings.GridLinesColor;
-                            Settings.GridLinesSpacing = settings.GridLinesSpacing;
-
-                            Settings.LibreHardwareMonitor = settings.LibreHardwareMonitor;
-                            Settings.LibreHardwareMonitorStorage = settings.LibreHardwareMonitorStorage;
-                            Settings.LibreHardwareMonitorStorageInterval = settings.LibreHardwareMonitorStorageInterval;
-                            Settings.WebServer = settings.WebServer;
-                            Settings.WebServerListenIp = settings.WebServerListenIp;
-                            Settings.WebServerListenPort = settings.WebServerListenPort;
-                            Settings.WebServerRefreshRate = settings.WebServerRefreshRate;
-                            Settings.TargetFrameRate = settings.TargetFrameRate;
-                            Settings.TargetGraphUpdateRate = settings.TargetGraphUpdateRate;
-                            Settings.Version = settings.Version;
-                            Settings.AutosaveEnabled = settings.AutosaveEnabled;
-                            Settings.AutosaveIdleSeconds = Math.Clamp(settings.AutosaveIdleSeconds, 1, 60);
-                            Settings.ProgramSpecificPanelsEnabled = settings.ProgramSpecificPanelsEnabled;
-                            Settings.HideOtherProfilesWhenProgramSpecificShown = settings.HideOtherProfilesWhenProgramSpecificShown;
-
-                            // Load BeadaPanel multi-device settings
-                            Settings.BeadaPanelMultiDeviceMode = settings.BeadaPanelMultiDeviceMode;
-
-                            // Clear existing devices and add loaded ones
-                            Settings.BeadaPanelDevices.Clear();
-                            foreach (var device in settings.BeadaPanelDevices)
-                            {
-                                Settings.BeadaPanelDevices.Add(device);
-                            }
-
-                            Settings.TuringPanelMultiDeviceMode = settings.TuringPanelMultiDeviceMode;
-
-                            Settings.TuringPanelDevices.Clear();
-                            foreach (var device in settings.TuringPanelDevices)
-                            {
-                                Settings.TuringPanelDevices.Add(device);
-                            }
-
-                            // Load Thermalright panel settings
-                            Settings.ThermalrightPanelMultiDeviceMode = settings.ThermalrightPanelMultiDeviceMode;
-
-                            Settings.ThermalrightPanelDevices.Clear();
-                            foreach (var device in settings.ThermalrightPanelDevices)
-                            {
-                                Settings.ThermalrightPanelDevices.Add(device);
-                            }
-
-                            // Load Thermaltake panel settings
-                            Settings.ThermaltakePanelMultiDeviceMode = settings.ThermaltakePanelMultiDeviceMode;
-
-                            Settings.ThermaltakePanelDevices.Clear();
-                            foreach (var device in settings.ThermaltakePanelDevices)
-                            {
-                                Settings.ThermaltakePanelDevices.Add(device);
-                            }
-
-                            // Load hotkey bindings
-                            Settings.HotkeyBindings.Clear();
-                            foreach (var binding in settings.HotkeyBindings)
-                            {
-                                Settings.HotkeyBindings.Add(binding);
-                            }
-
+                            SettingsCopy.ReplaceItems(Settings.BeadaPanelDevices, settings.BeadaPanelDevices);
+                            SettingsCopy.ReplaceItems(Settings.TuringPanelDevices, settings.TuringPanelDevices);
+                            SettingsCopy.ReplaceItems(Settings.ThermalrightPanelDevices, settings.ThermalrightPanelDevices);
+                            SettingsCopy.ReplaceItems(Settings.ThermaltakePanelDevices, settings.ThermaltakePanelDevices);
+                            SettingsCopy.ReplaceItems(Settings.HotkeyBindings, settings.HotkeyBindings);
                         }
 
                         _ = Task.Run(ValidateStartupAsync);

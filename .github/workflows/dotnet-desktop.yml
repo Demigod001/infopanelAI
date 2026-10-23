@@ -43,6 +43,9 @@ jobs:
     #     restore-keys: |
     #       ${{ runner.os }}-nuget-
 
+    - name: Test
+      run: dotnet test InfoPanel.Tests/InfoPanel.Tests.csproj -c Release --verbosity minimal
+
     - name: Build InfoPanel
       run: |
         dotnet restore --force-evaluate
