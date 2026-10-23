@@ -5,6 +5,7 @@ using Serilog;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -261,7 +262,23 @@ namespace InfoPanel.Views.Pages
                 // Failures were also swallowed by an empty catch, so the user saw nothing happen.
                 try
                 {
+                    // Never run an installer we cannot verify.
+                    if (ViewModel.VersionModel.ChecksumUrl is not string checksumUrl)
+                    {
+                        throw new InvalidOperationException("This release has no checksum file, so it cannot be verified.");
+                    }
+
+                    var expectedHash = await DownloadExpectedSha256Async(checksumUrl, cts.Token);
+
                     using var stream = await DownloadStreamWithProgressAsync(url, cts.Token, progressReporter);
+
+                    var actualHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
+                    if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Logger.Error("Update checksum mismatch. Expected {Expected}, got {Actual}", expectedHash, actualHash);
+                        throw new InvalidOperationException("The downloaded installer did not match its published checksum, so it was not run. Please try again later.");
+                    }
+                    stream.Position = 0;
 
                     var downloadPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel", "updates");
                     Directory.CreateDirectory(downloadPath);
@@ -286,6 +303,23 @@ namespace InfoPanel.Views.Pages
 
                 ViewModel.DownloadInProgress = false;
             }
+        }
+
+        /// <summary>
+        /// Reads a .sha256 file ("&lt;hex&gt;" or "&lt;hex&gt;  filename", as written by sha256sum/PowerShell) and returns the hash.
+        /// </summary>
+        private static async Task<string> DownloadExpectedSha256Async(string checksumUrl, CancellationToken cancellationToken)
+        {
+            using var httpClient = new HttpClient();
+            var content = await httpClient.GetStringAsync(checksumUrl, cancellationToken);
+            var hash = content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+
+            if (hash.Length != 64 || !hash.All(Uri.IsHexDigit))
+            {
+                throw new InvalidOperationException("The published checksum file is not valid.");
+            }
+
+            return hash;
         }
 
         public static void SaveStreamToFile(Stream stream, string filePath)
