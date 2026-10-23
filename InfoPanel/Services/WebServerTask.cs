@@ -228,12 +228,13 @@ namespace InfoPanel
                     sb.AppendLine("<body>");
                     sb.AppendLine("    <div class='container'>");
                     sb.AppendLine("        <div class='header'>");
-                    sb.AppendLine("                    <h1>InfoPanel Remote Sensor</h1>");
-                    sb.AppendLine("                </div>");
-                    sb.AppendLine("            </div>");
+                    sb.AppendLine("            <h1>InfoPanel Remote Sensor</h1>");
                     sb.AppendLine("        </div>");
 
-                    if (ConfigModel.Instance.Profiles.Count == 0)
+                    // Snapshot the list: Profiles is modified on the UI thread while requests run on the thread pool.
+                    var profiles = ConfigModel.Instance.GetProfilesCopy();
+
+                    if (profiles.Count == 0)
                     {
                         sb.AppendLine("        <div class='empty-state'>");
                         sb.AppendLine("            <svg class='empty-icon' xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='currentColor'>");
@@ -247,10 +248,12 @@ namespace InfoPanel
                     {
                         sb.AppendLine("        <div class='profiles-grid'>");
 
-                        for (int i = 0; i < ConfigModel.Instance.Profiles.Count; i++)
+                        for (int i = 0; i < profiles.Count; i++)
                         {
-                            var profile = ConfigModel.Instance.Profiles[i];
-                            var profileUrl = $"http://{ConfigModel.Instance.Settings.WebServerListenIp}:{ConfigModel.Instance.Settings.WebServerListenPort}/{i}";
+                            var profile = profiles[i];
+                            // Relative link: an absolute URL built from the listen address breaks when
+                            // listening on 0.0.0.0 / * (the browser cannot go to http://0.0.0.0:port/).
+                            var profileUrl = $"/{i}";
 
                             sb.AppendLine($"        <a href='{profileUrl}' class='profile-card'>");
                             sb.AppendLine($"            <div class='profile-header'>");
@@ -283,7 +286,9 @@ namespace InfoPanel
 
                 _webApplication.MapGet("/{id}", async context =>
                 {
-                    var filePath = "index.html";
+                    // Resolve next to the executable, not the working directory, which is not the
+                    // install folder when InfoPanel is launched at login by the scheduled task.
+                    var filePath = Path.Combine(AppContext.BaseDirectory, "index.html");
                     var content = await File.ReadAllTextAsync(filePath, Encoding.UTF8);
                     content = content.Replace("{{REFRESH_RATE}}", $"{ConfigModel.Instance.Settings.WebServerRefreshRate}");
                     context.Response.ContentType = "text/html";
@@ -292,10 +297,12 @@ namespace InfoPanel
 
                 _webApplication.MapGet("/{id}/image", async context =>
                 {
-                    if (int.TryParse(context.Request.RouteValues["id"]?.ToString(), out int id) && id < ConfigModel.Instance.Profiles.Count)
+                    var profiles = ConfigModel.Instance.GetProfilesCopy();
+                    // id >= 0 check: "/-1/image" previously threw ArgumentOutOfRangeException (HTTP 500).
+                    if (int.TryParse(context.Request.RouteValues["id"]?.ToString(), out int id) && id >= 0 && id < profiles.Count)
                     {
                         Logger.Debug("WebServer: Serving image for profile {ProfileId}", id);
-                        var profile = ConfigModel.Instance.Profiles[id];
+                        var profile = profiles[id];
 
                         using var bitmap = PanelDrawTask.RenderSK(profile, false);
                         using var data = bitmap.Encode(SKEncodedImageFormat.Png, 100);

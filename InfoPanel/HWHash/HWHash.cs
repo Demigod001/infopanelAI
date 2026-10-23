@@ -178,7 +178,35 @@ using System.Timers;
             aTimer.Enabled = true;
         }
 
+        private static int _pollInProgress = 0;
+
         private static void PollSensorData(object source, ElapsedEventArgs e)
+        {
+            // System.Timers.Timer fires on the thread pool and does not wait for the previous
+            // tick to finish. With short intervals (SetDelay allows 20 ms) or a slow read, ticks
+            // overlapped: one could dispose a connection's MemMap while another was reading it,
+            // and probing could register the same remote connection twice. Skip overlapping ticks.
+            if (Interlocked.CompareExchange(ref _pollInProgress, 1, 0) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                PollSensorDataCore();
+            }
+            catch (Exception ex)
+            {
+                // System.Timers.Timer silently swallows exceptions; log them so sensor freezes are diagnosable.
+                Logger.Error(ex, "HWHash: error while polling sensor data");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _pollInProgress, 0);
+            }
+        }
+
+        private static void PollSensorDataCore()
         {
             if (HWINFO_RUNNING)
             {
@@ -200,6 +228,16 @@ using System.Timers;
                 {
                     if (CheckMem(conn))
                     {
+                        // Headers were only built once. If HWiNFO's sensor list changes while it keeps
+                        // running, readings reference sensor indexes missing from HeaderDict and every
+                        // poll threw KeyNotFoundException, freezing all values. Rebuild when the count changes.
+                        if (conn.MemRegion.SS_SensorElements != conn.HeaderDict.Count)
+                        {
+                            Logger.Information("HWiNFO sensor list changed for {Connection}; rebuilding headers", conn.RemoteIndex == -1 ? "Local" : $"Remote {conn.RemoteIndex}");
+                            conn.HeaderDict.Clear();
+                            BuildHeaders(conn);
+                        }
+
                         ReadSensors(conn);
                     }
                     else
@@ -372,7 +410,13 @@ using System.Timers;
 
         private static void FormatSensor(ShmConnection conn, HWHASH_ELEMENT READING)
         {
-            var KEY = (conn.RemoteIndex, conn.HeaderDict[READING.Index].ID, conn.HeaderDict[READING.Index].Instance, READING.ID);
+            if (!conn.HeaderDict.TryGetValue(READING.Index, out var header))
+            {
+                // Reading refers to a sensor we have no header for (sensor list changed mid-poll); skip it this cycle.
+                return;
+            }
+
+            var KEY = (conn.RemoteIndex, header.ID, header.Instance, READING.ID);
             ulong UNIQUE_ID = FastConcat(READING.ID, READING.Index);
             bool FirstTest = SENSORHASH.ContainsKey(KEY);
             if (FirstTest == false)
@@ -402,11 +446,11 @@ using System.Timers;
                     ValueMin = READING.ValueMin,
                     ValueMax = READING.ValueMax,
                     ValueAvg = READING.ValueAvg,
-                    ParentNameDefault = conn.HeaderDict[READING.Index].NameDefault,
-                    ParentNameCustom = conn.HeaderDict[READING.Index].NameCustom,
-                    ParentID = conn.HeaderDict[READING.Index].ID,
-                    ParentInstance = conn.HeaderDict[READING.Index].Instance,
-                    ParentUniqueID = FastConcat(conn.HeaderDict[READING.Index].ID, conn.HeaderDict[READING.Index].Instance),
+                    ParentNameDefault = header.NameDefault,
+                    ParentNameCustom = header.NameCustom,
+                    ParentID = header.ID,
+                    ParentInstance = header.Instance,
+                    ParentUniqueID = FastConcat(header.ID, header.Instance),
                     IndexOrder = IndexOrder++,
                     RemoteIndex = conn.RemoteIndex
 
