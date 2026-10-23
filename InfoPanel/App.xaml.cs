@@ -270,6 +270,7 @@ namespace InfoPanel
         protected override void OnExit(ExitEventArgs e)
         {
             Logger.Information("Application exiting");
+            ConnectorHealth.ConnectorHealthService.Instance.Stop();
             ConfigModel.Instance.Cleanup();
             Log.CloseAndFlush();
             base.OnExit(e);
@@ -397,6 +398,9 @@ namespace InfoPanel
 
             HWHash.SetDelay(500);
             HWHash.Launch();
+
+            // Long-term WireView pin tracking; idle unless HWiNFO reports a WireView.
+            ConnectorHealth.ConnectorHealthService.Instance.Start();
 
             // Check PawniO status before starting LibreHardwareMonitor
             if (ConfigModel.Instance.Settings.LibreHardwareMonitor)
