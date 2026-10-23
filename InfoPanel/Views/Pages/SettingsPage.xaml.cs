@@ -28,6 +28,9 @@ namespace InfoPanel.Views.Pages
             DataContext = this;
             InitializeComponent();
 
+            Loaded += (_, _) => StartConnectorHealthStatus();
+            Unloaded += (_, _) => StopConnectorHealthStatus();
+
             ComboBoxListenIp.Items.Add("127.0.0.1");
             foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
             {
@@ -77,6 +80,54 @@ namespace InfoPanel.Views.Pages
         {
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel");
             Process.Start(new ProcessStartInfo("explorer.exe", path));
+        }
+
+        private System.Windows.Threading.DispatcherTimer? _connectorHealthTimer;
+
+        private void StartConnectorHealthStatus()
+        {
+            UpdateConnectorHealthStatus();
+            _connectorHealthTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            _connectorHealthTimer.Tick -= ConnectorHealthTimer_Tick;
+            _connectorHealthTimer.Tick += ConnectorHealthTimer_Tick;
+            _connectorHealthTimer.Start();
+        }
+
+        private void StopConnectorHealthStatus()
+        {
+            _connectorHealthTimer?.Stop();
+        }
+
+        private void ConnectorHealthTimer_Tick(object? sender, EventArgs e) => UpdateConnectorHealthStatus();
+
+        private void UpdateConnectorHealthStatus()
+        {
+            var service = ConnectorHealth.ConnectorHealthService.Instance;
+            ConnectorHealthStatusText.Text = service.WireViewDetected
+                ? service.LastStatus?.Text ?? "Waiting for readings..."
+                : "No WireView found in HWiNFO. HWiNFO must be running with shared memory enabled.";
+        }
+
+        private void ButtonConnectorHistory_Click(object sender, RoutedEventArgs e)
+        {
+            var path = ConnectorHealth.ConnectorHealthService.DataFolderPath;
+            Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo("explorer.exe", path));
+        }
+
+        private void ButtonConnectorReseated_Click(object sender, RoutedEventArgs e)
+        {
+            var result = System.Windows.MessageBox.Show(
+                "Start a new baseline for the GPU power connector?\n\n" +
+                "Do this after reseating or replacing the cable. The tracker will spend the next few hours under load " +
+                "learning the new fit before it compares again. Existing history files are kept.",
+                "Connector reseated", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.OK)
+            {
+                ConnectorHealth.ConnectorHealthService.Instance.ResetBaseline();
+                UpdateConnectorHealthStatus();
+            }
         }
 
         private async void ButtonCheckPawnIO_Click(object sender, RoutedEventArgs e)

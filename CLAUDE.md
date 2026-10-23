@@ -189,7 +189,7 @@ GitHub Actions workflow: `.github/workflows/dotnet-desktop.yml`
 - **x64 only** — `<Platforms>x64</Platforms>` is set in all csproj files
 - Warning level 6 and nullable reference types are enabled
 - `AllowUnsafeBlocks` is enabled for performance-critical code
-- `InfoPanel.Tests` covers version comparison and settings copy. It does not reference the WPF app, so it runs with `dotnet test InfoPanel.Tests/InfoPanel.Tests.csproj` on any OS
+- `InfoPanel.Tests` covers version comparison, settings copy and the connector health analysis (`InfoPanel/ConnectorHealth/ConnectorHealthModel.cs`). It does not reference the WPF app, so it runs with `dotnet test InfoPanel.Tests/InfoPanel.Tests.csproj` on any OS
 - Plugins are loaded from the `plugins` directory at runtime
 
 ## API Client
