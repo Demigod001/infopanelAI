@@ -874,7 +874,11 @@ namespace InfoPanel
                         profileEntry = entry;
                     else if (entry.FullName.Equals("DisplayItems.xml", StringComparison.OrdinalIgnoreCase))
                         displayItemsEntry = entry;
-                    else if (entry.FullName.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || entry.FullName.StartsWith("assets\\", StringComparison.OrdinalIgnoreCase))
+                    else if ((entry.FullName.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || entry.FullName.StartsWith("assets\\", StringComparison.OrdinalIgnoreCase))
+                             && !string.IsNullOrEmpty(entry.Name))
+                        // Skip folder entries ("assets/"): their Name is empty, so ExtractToFile targeted the
+                        // asset folder itself and threw, aborting the import half-way. Archives re-zipped
+                        // with Explorer or 7-Zip usually contain these entries.
                         assets.Add(entry);
                 }
 

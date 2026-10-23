@@ -256,24 +256,32 @@ namespace InfoPanel.Views.Pages
                     ViewModel.DownloadStatus = $"{FormatBytes(args.BytesReceived)} / {FormatBytes(args.TotalBytes)} ({args.PercentComplete:F0}%)";
                 });
 
-                using (var stream = await DownloadStreamWithProgressAsync(url, cts.Token, progressReporter))
+                // The download used to sit outside the try block, so a network error escaped this
+                // async void handler, and DownloadInProgress was never reset (button stuck).
+                // Failures were also swallowed by an empty catch, so the user saw nothing happen.
+                try
                 {
-                    try
-                    {
-                        var downloadPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel", "updates");
-                        if (!Directory.Exists(downloadPath))
-                        {
-                            Directory.CreateDirectory(downloadPath);
-                        }
+                    using var stream = await DownloadStreamWithProgressAsync(url, cts.Token, progressReporter);
 
-                        var filePath = Path.Combine(downloadPath, "InfoPanelSetup.exe");
+                    var downloadPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel", "updates");
+                    Directory.CreateDirectory(downloadPath);
 
-                        SaveStreamToFile(stream, filePath);
+                    var filePath = Path.Combine(downloadPath, "InfoPanelSetup.exe");
 
-                        Process.Start(filePath);
-                        Environment.Exit(0);
-                    }
-                    catch { }
+                    SaveStreamToFile(stream, filePath);
+
+                    // UseShellExecute so Windows can show the UAC prompt the installer needs.
+                    // .NET defaults this to false, and CreateProcess cannot start an exe that
+                    // requires elevation (ERROR_ELEVATION_REQUIRED), so the update silently did nothing.
+                    Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });
+                    Environment.Exit(0);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Update download or launch failed");
+                    System.Windows.MessageBox.Show(
+                        $"The update could not be downloaded or started.\n\n{ex.Message}",
+                        "InfoPanel Update", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
 
                 ViewModel.DownloadInProgress = false;
@@ -346,7 +354,8 @@ namespace InfoPanel.Views.Pages
 
             public double BytesReceived { get; }
 
-            public double PercentComplete => 100 * (BytesReceived / TotalBytes);
+            // TotalBytes is 0 when the server sends no Content-Length; avoid showing NaN/Infinity.
+            public double PercentComplete => TotalBytes > 0 ? 100 * (BytesReceived / TotalBytes) : 0;
         }
     }
 }

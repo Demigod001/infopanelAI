@@ -105,11 +105,20 @@ namespace InfoPanel.Monitors
         /// </summary>
         internal static string? UnzipPluginArchive(string filePath)
         {
-            using var fs = new FileStream(filePath, FileMode.Open);
+            // FileAccess.Read: the default (ReadWrite) fails on read-only files or folders.
+            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
             using var za = new ZipArchive(fs, ZipArchiveMode.Read);
+            if (za.Entries.Count == 0)
+            {
+                return null;
+            }
+
             var entry = za.Entries[0];
 
-            var match = Regex.Match(entry.FullName, @"(InfoPanel\.[a-zA-Z0-9]+)\/");
+            // Anchored: unanchored, a ZIP whose first entry was e.g. "x/InfoPanel.Foo/a.dll" matched,
+            // the whole archive was extracted into the plugins root (overwriting other plugins'
+            // folders), and a folder path that does not exist was returned.
+            var match = Regex.Match(entry.FullName, @"^(InfoPanel\.[a-zA-Z0-9]+)[/\\]");
             if (match.Success)
             {
                 // Structured ZIP: has InfoPanel.Name/ folder inside
@@ -143,7 +152,7 @@ namespace InfoPanel.Monitors
                 if (za.Entries.Count == 0) return null;
 
                 var entry = za.Entries[0];
-                var match = Regex.Match(entry.FullName, @"(InfoPanel\.[a-zA-Z0-9]+)\/");
+                var match = Regex.Match(entry.FullName, @"^(InfoPanel\.[a-zA-Z0-9]+)[/\\]");
                 if (match.Success)
                     return match.Groups[1].Value;
 

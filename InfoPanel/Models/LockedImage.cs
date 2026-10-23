@@ -116,6 +116,9 @@ namespace InfoPanel.Models
 
         private readonly ProxyPluginImage? _pluginImage;
 
+        // Last video frame grabbed for each requested size, so redraws between new video frames reuse it.
+        private readonly System.Collections.Generic.Dictionary<(int Width, int Height), (long Time, SKImage Image)> _videoFrameCache = [];
+
         private readonly object Lock = new();
         private const int AccessLockTimeoutMs = 50;
         private bool IsDisposed = false;
@@ -616,9 +619,78 @@ namespace InfoPanel.Models
             }
         }
 
+        /// <summary>
+        /// Returns the current video frame at the requested size. Must be called while holding <see cref="Lock"/>.
+        ///
+        /// Grabbing a frame is expensive: the GPU renders and copies it to a staging texture, the CPU waits
+        /// for that and copies it into a new WPF bitmap, which is then copied again into Skia. Previously this
+        /// ran on every redraw, even when the video had not advanced, and added a third full-size copy through
+        /// a temporary byte array. Now a frame is only grabbed when the playback position has moved, and it is
+        /// copied straight from the WPF bitmap into Skia.
+        /// </summary>
+        private SKImage? GetVideoFrame(Player player, int targetWidth, int targetHeight)
+        {
+            var sizeKey = (targetWidth, targetHeight);
+            var curTime = player.CurTime;
+
+            // Live streams (HLS) do not update CurTime per frame, so always grab a fresh frame for them.
+            var canReuse = !player.IsLive;
+
+            if (canReuse && _videoFrameCache.TryGetValue(sizeKey, out var cached) && cached.Time == curTime)
+            {
+                return cached.Image;
+            }
+
+            var bitmapSource = player.TakeSnapshotToBitmapSource((uint)targetWidth, (uint)targetHeight);
+            if (bitmapSource == null)
+            {
+                // No frame available right now; keep showing the last one we had.
+                return _videoFrameCache.TryGetValue(sizeKey, out cached) ? cached.Image : null;
+            }
+
+            var image = ConvertBitmapSourceToSKImage(bitmapSource);
+
+            if (_videoFrameCache.TryGetValue(sizeKey, out var previous))
+            {
+                // Safe even if a GPU canvas still references it: SKImage is reference-counted natively.
+                previous.Image.Dispose();
+            }
+            else if (_videoFrameCache.Count >= 4)
+            {
+                // Several surfaces at different sizes (overlay, preview, web): keep this bounded.
+                ClearVideoFrameCache();
+            }
+
+            _videoFrameCache[sizeKey] = (curTime, image);
+            return image;
+        }
+
+        private void ClearVideoFrameCache()
+        {
+            foreach (var entry in _videoFrameCache.Values)
+            {
+                entry.Image.Dispose();
+            }
+            _videoFrameCache.Clear();
+        }
+
         public static SKImage ConvertBitmapSourceToSKImage(BitmapSource bitmapSource)
         {
             var info = new SKImageInfo(bitmapSource.PixelWidth, bitmapSource.PixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+
+            // The video player returns a WriteableBitmap in Bgra32. Copy straight from its pixel buffer
+            // instead of going through a temporary managed array (one fewer full-frame copy, and no
+            // large-object-heap allocation per frame for the garbage collector to clean up).
+            if (bitmapSource is WriteableBitmap writeable && writeable.Format == System.Windows.Media.PixelFormats.Bgra32)
+            {
+                return SKImage.FromPixelCopy(info, writeable.BackBuffer, writeable.BackBufferStride);
+            }
+
+            return ConvertBitmapSourceToSKImageSlow(bitmapSource, info);
+        }
+
+        private static SKImage ConvertBitmapSourceToSKImageSlow(BitmapSource bitmapSource, SKImageInfo info)
+        {
             var pixels = new byte[info.RowBytes * info.Height];
             bitmapSource.CopyPixels(pixels, info.RowBytes, 0);
 
@@ -678,10 +750,9 @@ namespace InfoPanel.Models
                 {
                     if (_backgroundVideoPlayer != null)
                     {
-                        var bitmapSource = _backgroundVideoPlayer.TakeSnapshotToBitmapSource((uint)targetWidth, (uint)targetHeight);
-                        if (bitmapSource != null)
+                        var image = GetVideoFrame(_backgroundVideoPlayer, targetWidth, targetHeight);
+                        if (image != null)
                         {
-                            using var image = ConvertBitmapSourceToSKImage(bitmapSource);
                             access(image);
                         }
                     }
@@ -766,6 +837,7 @@ namespace InfoPanel.Models
                     Log.Debug("Clearing SKImageMemoryCache[{Key}]", key);
                 }
                 SKImageMemoryCache.Clear();
+                ClearVideoFrameCache();
             }
         }
 
@@ -797,6 +869,7 @@ namespace InfoPanel.Models
 
                     _backgroundVideoPlayer?.Stop();
                     _backgroundVideoPlayer?.Dispose();
+                    ClearVideoFrameCache();
 
                     _codec?.Dispose();
                     _stream?.Dispose();

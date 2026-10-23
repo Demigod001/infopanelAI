@@ -389,7 +389,9 @@ namespace InfoPanel
                     taskDefinition.RegistrationInfo.Description = "Runs InfoPanel on startup.";
                     taskDefinition.RegistrationInfo.Author = "Habib Rehman";
                     taskDefinition.Triggers.Add(new LogonTrigger { Delay = TimeSpan.FromSeconds(Settings.AutoStartDelay) });
-                    taskDefinition.Actions.Add(new ExecAction(Application.ExecutablePath));
+                    // Set the working directory; without it Task Scheduler starts the app in System32,
+                    // so anything resolved relative to the current directory is not found.
+                    taskDefinition.Actions.Add(new ExecAction(Application.ExecutablePath, null, Path.GetDirectoryName(Application.ExecutablePath)));
                     taskDefinition.Principal.RunLevel = TaskRunLevel.Highest;
                     taskDefinition.Settings.DisallowStartIfOnBatteries = false;
                     taskDefinition.Settings.StopIfGoingOnBatteries = false;
@@ -572,8 +574,9 @@ namespace InfoPanel
                 // File.Replace automatically creates a backup and atomically replaces the file
                 if (File.Exists(fileName))
                 {
+                    // Keep settings.xml.bak: LoadSettings falls back to it if settings.xml is unreadable.
+                    // (It was previously deleted straight away, so that fallback could never work.)
                     File.Replace(tempFileName, fileName, backupFileName, ignoreMetadataErrors: true);
-                    try { File.Delete(backupFileName); } catch { }
                 }
                 else
                 {
@@ -586,20 +589,9 @@ namespace InfoPanel
                 // Log error
                 Logger.Error(ex, "Error saving settings");
 
-                // Try to restore from backup if available
-                var backupFileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel", "settings.xml.bak");
-                if (File.Exists(backupFileName))
-                {
-                    try
-                    {
-                        var fileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel", "settings.xml");
-                        File.Copy(backupFileName, fileName, overwrite: true);
-                    }
-                    catch
-                    {
-                        // Failed to restore backup
-                    }
-                }
+                // settings.xml is only ever changed by the atomic File.Replace/Move above, so a
+                // failed save leaves it intact. Copying the backup over it here would roll the
+                // user back to an older version, so there is nothing to restore.
                 throw;
             }
         }
@@ -813,12 +805,35 @@ namespace InfoPanel
 
                 var profiles = GetProfilesCopy();
                 var fileName = Path.Combine(folder, "profiles.xml");
+                var tempFileName = fileName + ".tmp";
+                var backupFileName = fileName + ".bak";
                 XmlSerializer xs = new XmlSerializer(typeof(List<Profile>));
                 var settings = new XmlWriterSettings() { Encoding = Encoding.UTF8, Indent = true };
-                using (var wr = XmlWriter.Create(fileName, settings))
-                {
 
+                // Write to a temp file and swap it in atomically. Writing profiles.xml in place
+                // meant a crash or power loss mid-write left a truncated file, which then loaded
+                // as "no profiles" and triggered the orphan cleanup below to delete every profile.
+                using (var wr = XmlWriter.Create(tempFileName, settings))
+                {
                     xs.Serialize(wr, profiles);
+                }
+
+                if (File.Exists(fileName))
+                {
+                    // Keep the previous good copy as profiles.xml.bak for LoadProfilesFromFile to fall back on.
+                    File.Replace(tempFileName, fileName, backupFileName, ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(tempFileName, fileName, overwrite: true);
+                }
+
+                // If profiles.xml could not be read at startup, the in-memory list is not the
+                // user's real profile list. Never delete profile files or assets on that basis.
+                if (_profilesLoadFailed)
+                {
+                    Logger.Warning("Skipping profile file cleanup because profiles.xml failed to load at startup");
+                    return;
                 }
 
                 //clean up profile xml
@@ -881,34 +896,76 @@ namespace InfoPanel
 
         public void LoadProfiles()
         {
-            var profiles = LoadProfilesFromFile();
-            if (profiles != null)
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel");
+            var fileName = Path.Combine(folder, "profiles.xml");
+            var backupFileName = fileName + ".bak";
+
+            var profiles = TryLoadProfilesFromPath(fileName);
+
+            if (profiles == null && File.Exists(fileName))
+            {
+                // profiles.xml exists but is unreadable (e.g. truncated by a crash).
+                // Protect the user's profile files from the orphan cleanup in SaveProfiles,
+                // keep a copy of the damaged file, and try the backup.
+                _profilesLoadFailed = true;
+                try
+                {
+                    File.Copy(fileName, Path.Combine(folder, $"profiles.xml.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}"), overwrite: false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning(ex, "Failed to keep a copy of unreadable profiles.xml");
+                }
+
+                profiles = TryLoadProfilesFromPath(backupFileName);
+                if (profiles != null)
+                {
+                    Logger.Warning("profiles.xml could not be read; loaded profiles from backup");
+                }
+                else
+                {
+                    Logger.Error("profiles.xml could not be read and no usable backup exists");
+                }
+            }
+
+            if (profiles != null && profiles.Count > 0)
             {
                 lock (_profilesLock)
                 {
                     Profiles.Clear();
-                    profiles?.ForEach(Profiles.Add);
+                    profiles.ForEach(Profiles.Add);
                 }
 
-                SharedModel.Instance.SelectedProfile = Profiles.FirstOrDefault(profile => { return profile.Active; }, Profiles[0]);
+                SharedModel.Instance.SelectedProfile = Profiles.FirstOrDefault(profile => profile.Active) ?? Profiles[0];
             }
         }
+
+        private bool _profilesLoadFailed = false;
 
         public static List<Profile>? LoadProfilesFromFile()
         {
             var fileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InfoPanel", "profiles.xml");
-            if (File.Exists(fileName))
+            return TryLoadProfilesFromPath(fileName);
+        }
+
+        private static List<Profile>? TryLoadProfilesFromPath(string fileName)
+        {
+            if (!File.Exists(fileName))
+            {
+                return null;
+            }
+
+            try
             {
                 XmlSerializer xs = new(typeof(List<Profile>));
                 using var rd = XmlReader.Create(fileName);
-                try
-                {
-                    return xs.Deserialize(rd) as List<Profile>;
-                }
-                catch { }
+                return xs.Deserialize(rd) as List<Profile>;
             }
-
-            return null;
+            catch (Exception ex)
+            {
+                Logger.Warning(ex, "Failed to load profiles from {Path}", fileName);
+                return null;
+            }
         }
 
         private void Upgrade_File_Structure_For_1_3_1()
