@@ -1,12 +1,14 @@
 using System.Collections.Concurrent;
-using System.Data;
+using InfoPanel.Plugins;
 using InfoPanel.Plugins.Ipc;
 using InfoPanel.Plugins.Loader;
+using Serilog;
 
 namespace InfoPanel.Plugins.Host
 {
     public class SensorSnapshotManager
     {
+        private static readonly ILogger Logger = Log.ForContext<SensorSnapshotManager>();
         private readonly ConcurrentDictionary<string, object?> _lastValues = new();
         private readonly ConcurrentDictionary<(string containerId, string entryId), string> _keyCache = new();
 
@@ -16,15 +18,30 @@ namespace InfoPanel.Plugins.Host
 
             foreach (var container in wrapper.PluginContainers)
             {
-                foreach (var entry in container.Entries)
+                IPluginData[] entries;
+                try
+                {
+                    entries = container.Entries.ToArray();
+                }
+                catch (InvalidOperationException)
+                {
+                    continue;
+                }
+
+                foreach (var entry in entries)
                 {
                     var key = _keyCache.GetOrAdd(
                         (container.Id, entry.Id),
                         k => $"{wrapper.Id}/{k.containerId}/{k.entryId}");
-                    var update = CreateUpdateIfChanged(key, container.Id, entry);
-                    if (update != null)
+                    try
                     {
-                        updates.Add(update);
+                        var update = CreateUpdateIfChanged(key, container.Id, entry);
+                        if (update != null)
+                            updates.Add(update);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning(ex, "Skipped sensor {EntryId} in {PluginId}", entry.Id, wrapper.Id);
                     }
                 }
             }
@@ -72,7 +89,14 @@ namespace InfoPanel.Plugins.Host
             }
             else if (entry is IPluginTable table)
             {
-                var hash = ComputeTableHash(table);
+                // Do not record a hash when the read fails. The next tick retries,
+                // instead of the update loop aborting every plugin for this pass.
+                if (!TableDtoConverter.TryConvert(table, out var dto, out var hash))
+                {
+                    Logger.Debug("Table {EntryId} changed while it was being read", entry.Id);
+                    return null;
+                }
+
                 if (_lastValues.TryGetValue(key, out var lastHash) && lastHash is int lastInt && lastInt == hash)
                     return null;
 
@@ -82,41 +106,11 @@ namespace InfoPanel.Plugins.Host
                     ContainerId = containerId,
                     EntryId = entry.Id,
                     Type = "table",
-                    TableValue = TableDtoConverter.ConvertTableToDto(table)
+                    TableValue = dto
                 };
             }
 
             return null;
-        }
-
-        private static int ComputeTableHash(IPluginTable table)
-        {
-            var dt = table.Value;
-            if (dt == null) return 0;
-
-            var hash = HashCode.Combine(dt.Rows.Count, dt.Columns.Count);
-
-            foreach (DataRow row in dt.Rows)
-            {
-                for (int i = 0; i < dt.Columns.Count; i++)
-                {
-                    var value = row[i];
-                    if (value is IPluginSensor sensor)
-                    {
-                        hash = HashCode.Combine(hash, sensor.Value, sensor.ValueMin, sensor.ValueMax, sensor.ValueAvg);
-                    }
-                    else if (value is IPluginText text)
-                    {
-                        hash = HashCode.Combine(hash, text.Value?.GetHashCode() ?? 0);
-                    }
-                    else
-                    {
-                        hash = HashCode.Combine(hash, value?.GetHashCode() ?? 0);
-                    }
-                }
-            }
-
-            return hash;
         }
 
         public void Clear()

@@ -136,9 +136,6 @@ namespace InfoPanel.Extras
         private Dictionary<string, double> _secondUsageSample = [];
         private readonly Dictionary<string, long> _memorySample = [];
         private readonly Dictionary<string, Instance> _instances = [];
-        private readonly DataTable _reusableCpuUsageTable = new();
-        private readonly DataTable _reusableCpuUtilityTable = new();
-        private readonly DataTable _reusableMemoryTable = new();
 
         private void GetProcessInfo()
         {
@@ -248,36 +245,28 @@ namespace InfoPanel.Extras
 
             var result = _instances.Values.ToList();
 
-            //cpu usage
+            // Publish a new table each pass. Clearing a DataTable the host is still
+            // enumerating throws "Collection was modified" and drops that update tick.
             result.Sort((a, b) => b.Usage.CompareTo(a.Usage));
-            FillDataTable(_reusableCpuUsageTable, result, blacklist);
-            _topCpuUsage.Value = _reusableCpuUsageTable;
+            _topCpuUsage.Value = BuildDataTable(result, blacklist);
 
-            //cpu utility
             result.Sort((a, b) => b.Utility.CompareTo(a.Utility));
-            FillDataTable(_reusableCpuUtilityTable, result, blacklist);
-            _topCpuUtility.Value = _reusableCpuUtilityTable;
+            _topCpuUtility.Value = BuildDataTable(result, blacklist);
 
-            //memory
             result.Sort((a, b) => b.PrivateMemory.CompareTo(a.PrivateMemory));
-            FillDataTable(_reusableMemoryTable, result, blacklist);
-            _topMemoryUsage.Value = _reusableMemoryTable;
+            _topMemoryUsage.Value = BuildDataTable(result, blacklist);
 
             //set default — swap references instead of allocating
             (firstUsageSample, _secondUsageSample) = (_secondUsageSample, firstUsageSample);
         }
 
-        private static void FillDataTable(DataTable dataTable, List<Instance> instances, string[] blacklist)
+        private static DataTable BuildDataTable(List<Instance> instances, string[] blacklist)
         {
-            dataTable.Rows.Clear();
-
-            if (dataTable.Columns.Count == 0)
-            {
-                dataTable.Columns.Add("Process Name", typeof(PluginText));
-                dataTable.Columns.Add("Usage", typeof(PluginSensor));
-                dataTable.Columns.Add("Utility", typeof(PluginSensor));
-                dataTable.Columns.Add("Memory", typeof(PluginSensor));
-            }
+            var dataTable = new DataTable();
+            dataTable.Columns.Add("Process Name", typeof(PluginText));
+            dataTable.Columns.Add("Usage", typeof(PluginSensor));
+            dataTable.Columns.Add("Utility", typeof(PluginSensor));
+            dataTable.Columns.Add("Memory", typeof(PluginSensor));
 
             foreach(var instance in instances)
             {
@@ -293,6 +282,8 @@ namespace InfoPanel.Extras
                 row[3] = new PluginSensor("Memory", (float) (instance.PrivateMemory) / 1024 / 1024, " MB");
                 dataTable.Rows.Add(row);
             }
+
+            return dataTable;
         }
 
         class Instance
