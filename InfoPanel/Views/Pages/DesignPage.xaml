@@ -318,9 +318,18 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="auto" />
                     </Grid.ColumnDefinitions>
-                    <Label>
-                        <TextBlock FontWeight="Medium" Text="{Binding Source={x:Static local:SharedModel.Instance}, Path=SelectedItem, Converter={StaticResource SelectedItemTextConverter}}" />
-                    </Label>
+                    <StackPanel>
+                        <Label>
+                            <TextBlock FontWeight="Medium" Text="{Binding Source={x:Static local:SharedModel.Instance}, Path=SelectedItem, Converter={StaticResource SelectedItemTextConverter}}" />
+                        </Label>
+                        <TextBlock
+                            Margin="0,2,0,0"
+                            FontSize="12"
+                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                            Text="{Binding Source={x:Static local:SharedModel.Instance}, Path=MultiSelectionSummary}"
+                            TextWrapping="Wrap"
+                            Visibility="{Binding Source={x:Static local:SharedModel.Instance}, Path=IsMultipleItemsSelected, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
                     <Button
                         Grid.Column="1"
                         Width="20"

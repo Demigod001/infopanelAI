@@ -23,6 +23,53 @@
                 <RowDefinition Height="*" />
                 <RowDefinition Height="auto" />
             </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                <!--  Step size in one click (the middle button still cycles).  -->
+                <TextBlock
+                    Margin="0,0,0,4"
+                    FontSize="12"
+                    Text="Step (Shift + arrow keys = 10x)" />
+                <UniformGrid Columns="4">
+                    <ui:Button Margin="0,0,2,0" Padding="0,4" Click="ButtonStep_Click" Content="1" Tag="1" ToolTip="Move 1 px per step" />
+                    <ui:Button Margin="2,0,2,0" Padding="0,4" Click="ButtonStep_Click" Content="5" Tag="5" ToolTip="Move 5 px per step" />
+                    <ui:Button Margin="2,0,2,0" Padding="0,4" Click="ButtonStep_Click" Content="10" Tag="10" ToolTip="Move 10 px per step" />
+                    <ui:Button Margin="2,0,0,0" Padding="0,4" Click="ButtonStep_Click" Content="20" Tag="20" ToolTip="Move 20 px per step" />
+                </UniformGrid>
+
+                <!--  Align and distribute, for two or more items.  -->
+                <StackPanel Margin="0,10,0,0" Visibility="{Binding Source={x:Static app:SharedModel.Instance}, Path=CanAlignSelection, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <TextBlock
+                        Margin="0,0,0,4"
+                        FontSize="12"
+                        Text="Align selected" />
+                    <UniformGrid Columns="4">
+                        <ui:Button Margin="0,0,2,4" Padding="0,4" Click="ButtonAlign_Click" Icon="{ui:SymbolIcon AlignLeft24}" Tag="Left" ToolTip="Align left edges" />
+                        <ui:Button Margin="2,0,2,4" Padding="0,4" Click="ButtonAlign_Click" Icon="{ui:SymbolIcon AlignCenterVertical24}" Tag="CenterHorizontally" ToolTip="Centre horizontally" />
+                        <ui:Button Margin="2,0,2,4" Padding="0,4" Click="ButtonAlign_Click" Icon="{ui:SymbolIcon AlignRight24}" Tag="Right" ToolTip="Align right edges" />
+                        <ui:Button
+                            Margin="2,0,0,4"
+                            Padding="0,4"
+                            Click="ButtonDistribute_Click"
+                            Icon="{ui:SymbolIcon AlignSpaceEvenlyHorizontal20}"
+                            IsEnabled="{Binding Source={x:Static app:SharedModel.Instance}, Path=CanDistributeSelection}"
+                            Tag="Horizontal"
+                            ToolTip="Space evenly left to right (3 or more items)" />
+                        <ui:Button Margin="0,0,2,0" Padding="0,4" Click="ButtonAlign_Click" Icon="{ui:SymbolIcon AlignTop24}" Tag="Top" ToolTip="Align top edges" />
+                        <ui:Button Margin="2,0,2,0" Padding="0,4" Click="ButtonAlign_Click" Icon="{ui:SymbolIcon AlignCenterHorizontal24}" Tag="CenterVertically" ToolTip="Centre vertically" />
+                        <ui:Button Margin="2,0,2,0" Padding="0,4" Click="ButtonAlign_Click" Icon="{ui:SymbolIcon AlignBottom24}" Tag="Bottom" ToolTip="Align bottom edges" />
+                        <ui:Button
+                            Margin="2,0,0,0"
+                            Padding="0,4"
+                            Click="ButtonDistribute_Click"
+                            Icon="{ui:SymbolIcon AlignSpaceEvenlyVertical20}"
+                            IsEnabled="{Binding Source={x:Static app:SharedModel.Instance}, Path=CanDistributeSelection}"
+                            Tag="Vertical"
+                            ToolTip="Space evenly top to bottom (3 or more items)" />
+                    </UniformGrid>
+                </StackPanel>
+            </StackPanel>
+
             <StackPanel
                 Grid.Row="2"
                 Margin="0,10,0,0"

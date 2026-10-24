@@ -99,6 +99,20 @@ namespace InfoPanel.Drawing
                 }
             }
 
+            // Selection box while the user drags across empty space on the panel.
+            if (!preview && SharedModel.Instance.GetSelectionMarquee(profile) is ItemRect marquee)
+            {
+                if (!SKColor.TryParse(ConfigModel.Instance.Settings.SelectedItemColor, out var boxColor))
+                    boxColor = SKColors.LimeGreen;
+
+                var rect = new SKRect(marquee.Left * scale, marquee.Top * scale, marquee.Right * scale, marquee.Bottom * scale);
+                using var fill = new SKPaint { Color = boxColor.WithAlpha(40), Style = SKPaintStyle.Fill };
+                using var dash = SKPathEffect.CreateDash([6, 4], 0);
+                using var stroke = new SKPaint { Color = boxColor, Style = SKPaintStyle.Stroke, StrokeWidth = 1, PathEffect = dash, IsAntialias = true };
+                g.Canvas.DrawRect(rect, fill);
+                g.Canvas.DrawRect(rect, stroke);
+            }
+
             fpsCounter?.Update(stopwatch.ElapsedMilliseconds);
 
             if (profile.ShowFps && fpsCounter != null)

@@ -1,5 +1,6 @@
 ﻿using InfoPanel.Drawing;
 using InfoPanel.Models;
+using InfoPanel.Services;
 using InfoPanel.Utils;
 using Microsoft.Win32;
 using SkiaSharp;
@@ -608,34 +609,112 @@ namespace InfoPanel.Views.Common
         }
 
 
-        private void Window_KeyUp(object sender, System.Windows.Input.KeyEventArgs e)
+        /// <summary>
+        /// Arrow keys move the selection by the current step; holding Shift moves ten steps.
+        /// Handled on KeyDown (it was KeyUp) so holding a key repeats instead of moving once per press.
+        /// </summary>
+        private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
-            if (SharedModel.Instance.SelectedVisibleItems != null)
+            int dx = 0, dy = 0;
+            switch (e.Key)
             {
-                foreach (var displayItem in SharedModel.Instance.SelectedVisibleItems)
-                {
-                    switch (e.Key)
-                    {
-                        case Key.Up:
-                            displayItem.Y -= SharedModel.Instance.MoveValue;
-                            break;
-                        case Key.Down:
-                            displayItem.Y += SharedModel.Instance.MoveValue;
-                            break;
-                        case Key.Left:
-                            displayItem.X -= SharedModel.Instance.MoveValue;
-                            break;
-                        case Key.Right:
-                            displayItem.X += SharedModel.Instance.MoveValue;
-                            break;
-                    }
-                }
+                case Key.Up: dy = -1; break;
+                case Key.Down: dy = 1; break;
+                case Key.Left: dx = -1; break;
+                case Key.Right: dx = 1; break;
+                default: return;
             }
+
+            if (SharedModel.Instance.SelectedProfile != Profile) return;
+
+            var step = SharedModel.Instance.MoveValue * (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1);
+            EditorActions.MoveSelected(SharedModel.Instance.SelectedVisibleItems, dx * step, dy * step);
+            e.Handled = true;
         }
 
         private void Window_MouseUp(object sender, MouseButtonEventArgs e)
         {
             dragStart = false;
+            _dragStartPositions.Clear();
+
+            if (_marqueeActive)
+            {
+                FinishMarquee(GetProfilePoint(e));
+            }
+        }
+
+        // ---- Box selection: middle-drag, or Ctrl + left-drag, across empty space on the panel ----
+
+        private bool _marqueeActive;
+        private bool _marqueeAdditive;
+        private System.Windows.Point _marqueeStart;
+
+        private bool TryStartMarquee(MouseButtonEventArgs e)
+        {
+            if (SharedModel.Instance.SelectedProfile != Profile) return false;
+
+            var ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+            var startsMarquee = e.ChangedButton == MouseButton.Middle || (e.ChangedButton == MouseButton.Left && ctrl);
+            if (!startsMarquee) return false;
+
+            var point = GetProfilePoint(e);
+            if (FindItemAt(point) != null) return false; // clicking an item keeps its normal behaviour
+
+            _marqueeActive = true;
+            _marqueeAdditive = ctrl || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+            _marqueeStart = point;
+            SharedModel.Instance.SetSelectionMarquee(Profile, null);
+            CaptureMouse();
+            return true;
+        }
+
+        private void UpdateMarquee(System.Windows.Point current)
+        {
+            SharedModel.Instance.SetSelectionMarquee(Profile,
+                ItemRect.FromPoints((float)_marqueeStart.X, (float)_marqueeStart.Y, (float)current.X, (float)current.Y));
+        }
+
+        private void FinishMarquee(System.Windows.Point end)
+        {
+            _marqueeActive = false;
+            ReleaseMouseCapture();
+            SharedModel.Instance.SetSelectionMarquee(Profile, null);
+
+            var box = ItemRect.FromPoints((float)_marqueeStart.X, (float)_marqueeStart.Y, (float)end.X, (float)end.Y);
+
+            // A click without a drag just clears the selection (unless adding).
+            var isClick = box.Width < 3 && box.Height < 3;
+
+            var additive = _marqueeAdditive;
+            Application.Current.Dispatcher.BeginInvoke(() =>
+            {
+                EditorActions.SelectInBox(Profile, isClick ? null : box, additive);
+            });
+        }
+
+        /// <summary>Topmost visible item under the point, looking inside groups.</summary>
+        private DisplayItem? FindItemAt(System.Windows.Point point)
+        {
+            var displayItems = SharedModel.Instance.GetProfileDisplayItemsCopy(Profile).ToList();
+            displayItems.Reverse();
+
+            foreach (var item in displayItems)
+            {
+                if (item.Hidden) continue;
+
+                if (item is GroupDisplayItem group)
+                {
+                    var children = group.DisplayItemsCopy.ToList();
+                    children.Reverse();
+                    var child = children.FirstOrDefault(c => !c.Hidden && c.ContainsPoint(point));
+                    if (child != null) return child;
+                    continue;
+                }
+
+                if (item.ContainsPoint(point)) return item;
+            }
+
+            return null;
         }
 
         private void SetWindowPositionRelativeToScreen()
@@ -688,6 +767,11 @@ namespace InfoPanel.Views.Common
 
         private void Window_MouseDown(object sender, MouseButtonEventArgs e)
         {
+            if (TryStartMarquee(e))
+            {
+                return;
+            }
+
             if (e.ChangedButton == MouseButton.Left)
             {
                 if (!dragStart)
@@ -757,9 +841,11 @@ namespace InfoPanel.Views.Common
                 {
                     startPosition = GetProfilePoint(e);
 
+                    _dragStartPositions.Clear();
                     foreach (var item in SharedModel.Instance.SelectedVisibleItems)
                     {
                         item.MouseOffset = new System.Windows.Point(startPosition.X - item.X, startPosition.Y - item.Y);
+                        _dragStartPositions[item] = (item.X, item.Y);
                     }
 
                     dragStart = true;
@@ -772,58 +858,13 @@ namespace InfoPanel.Views.Common
                     return;
                 }
 
-                DisplayItem? clickedItem = null;
-
-                var displayItems = SharedModel.Instance.GetProfileDisplayItemsCopy(Profile).ToList();
-                displayItems.Reverse();
-
-                foreach (var item in displayItems)
-                {
-                    if (item.Hidden)
-                    {
-                        continue;
-                    }
-
-                    if (item is GroupDisplayItem groupDisplayItem)
-                    {
-                        var groupDisplayItems = groupDisplayItem.DisplayItemsCopy.ToList();
-                        groupDisplayItems.Reverse();
-                        foreach (var groupItem in groupDisplayItems)
-                        {
-                            if (groupItem.Hidden)
-                            {
-                                continue;
-                            }
-
-                            if (groupItem.ContainsPoint(GetProfilePoint(e)))
-                            {
-                                clickedItem = groupItem;
-                                break;
-                            }
-                        }
-
-                        if(clickedItem == null)
-                        {
-                            continue;
-                        }
-                    }
-
-                    if (clickedItem != null)
-                    {
-                        break;
-                    }
-
-                    if (item.ContainsPoint(GetProfilePoint(e)))
-                    {
-                        clickedItem = item;
-                        break;
-                    }
-                }
+                var clickedItem = FindItemAt(GetProfilePoint(e));
 
                 if (clickedItem != null)
                 {
-
-                    if (!Keyboard.IsKeyDown(Key.LeftCtrl) && !Keyboard.IsKeyDown(Key.LeftShift))
+                    // Either Ctrl or either Shift adds to the selection (previously only the left-hand keys worked).
+                    var adding = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+                    if (!adding)
                     {
                         Application.Current.Dispatcher.BeginInvoke(() =>
                         {
@@ -846,8 +887,17 @@ namespace InfoPanel.Views.Common
             }
         }
 
+        // Where each selected item was when the drag started.
+        private readonly System.Collections.Generic.Dictionary<DisplayItem, (int X, int Y)> _dragStartPositions = [];
+
         private void Window_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
         {
+            if (_marqueeActive)
+            {
+                UpdateMarquee(GetProfilePoint(e));
+                return;
+            }
+
             if (dragStart)
             {
 
@@ -861,19 +911,23 @@ namespace InfoPanel.Views.Common
 
                 var currentPosition = GetProfilePoint(e);
 
-                foreach (var displayItem in SharedModel.Instance.SelectedVisibleItems)
+                // Snap one anchor item to the grid and move every item by the same offset. Snapping each
+                // item separately (as before) changed the gaps between items that weren't already on the grid.
+                var movable = SharedModel.Instance.SelectedVisibleItems
+                    .Where(item => item.Selected && !item.IsLocked && _dragStartPositions.ContainsKey(item))
+                    .ToList();
+                if (movable.Count == 0) return;
+
+                var anchor = movable[0];
+                var anchorStart = _dragStartPositions[anchor];
+                var (dx, dy) = LayoutMath.SnappedDragOffset(anchorStart.X, anchorStart.Y,
+                    currentPosition.X - anchor.MouseOffset.X, currentPosition.Y - anchor.MouseOffset.Y, gridSize);
+
+                foreach (var displayItem in movable)
                 {
-                    if (displayItem.Selected && !displayItem.IsLocked)
-                    {
-                        int x = (int)(currentPosition.X - displayItem.MouseOffset.X);
-                        int y = (int)(currentPosition.Y - displayItem.MouseOffset.Y);
-
-                        x = (int)(Math.Round((double)x / gridSize) * gridSize);
-                        y = (int)(Math.Round((double)y / gridSize) * gridSize);
-
-                        displayItem.X = x;
-                        displayItem.Y = y;
-                    }
+                    var start = _dragStartPositions[displayItem];
+                    displayItem.X = start.X + dx;
+                    displayItem.Y = start.Y + dy;
                 }
 
                 startPosition = currentPosition;
