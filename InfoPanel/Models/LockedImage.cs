@@ -683,7 +683,29 @@ namespace InfoPanel.Models
             // large-object-heap allocation per frame for the garbage collector to clean up).
             if (bitmapSource is WriteableBitmap writeable && writeable.Format == System.Windows.Media.PixelFormats.Bgra32)
             {
-                return SKImage.FromPixelCopy(info, writeable.BackBuffer, writeable.BackBufferStride);
+                // BackBuffer is only valid between Lock and Unlock. Reading it unlocked is an
+                // access violation, which kills the process before the managed crash handler runs.
+                try
+                {
+                    writeable.Lock();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug(ex, "WriteableBitmap.Lock failed; copying pixels the slow way");
+                    return ConvertBitmapSourceToSKImageSlow(bitmapSource, info);
+                }
+
+                try
+                {
+                    if (writeable.BackBuffer == IntPtr.Zero || writeable.BackBufferStride <= 0)
+                        return ConvertBitmapSourceToSKImageSlow(bitmapSource, info);
+
+                    return SKImage.FromPixelCopy(info, writeable.BackBuffer, writeable.BackBufferStride);
+                }
+                finally
+                {
+                    writeable.Unlock();
+                }
             }
 
             return ConvertBitmapSourceToSKImageSlow(bitmapSource, info);

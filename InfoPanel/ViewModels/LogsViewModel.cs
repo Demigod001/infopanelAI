@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -45,7 +46,8 @@ namespace InfoPanel.ViewModels
                 }
 
                 var sessionStart = new DateTimeOffset(Process.GetCurrentProcess().StartTime);
-                var sb = new StringBuilder();
+                var previousLines = new Queue<string>(201);
+                var current = new StringBuilder();
                 bool inSession = false;
 
                 using var stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -63,11 +65,34 @@ namespace InfoPanel.ViewModels
 
                     if (inSession)
                     {
-                        sb.AppendLine(line);
+                        current.AppendLine(line);
+                    }
+                    else
+                    {
+                        previousLines.Enqueue(line);
+                        if (previousLines.Count > 200)
+                            previousLines.Dequeue();
                     }
                 }
 
-                LogText = sb.ToString();
+                // The page used to show only this process, so the crash that killed the last
+                // run disappeared as soon as InfoPanel was opened again.
+                var sb = new StringBuilder();
+                if (previousLines.Count > 0)
+                {
+                    sb.AppendLine("----- Previous session (last 200 lines) -----");
+                    foreach (var previousLine in previousLines)
+                        sb.AppendLine(previousLine);
+                    sb.AppendLine();
+                }
+
+                if (current.Length > 0)
+                {
+                    sb.AppendLine("----- This session -----");
+                    sb.Append(current);
+                }
+
+                LogText = sb.Length > 0 ? sb.ToString() : "No log lines in " + logFile;
                 HasLogs = LogText.Length > 0;
             }
             catch (Exception ex)
