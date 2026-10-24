@@ -35,10 +35,7 @@ namespace InfoPanel.Views.Components
             //    displayItem.Y -= SharedModel.Instance.MoveValue;
             //}
 
-            foreach (var item in SharedModel.Instance.SelectedItems)
-            {
-                item.Y -= SharedModel.Instance.MoveValue;
-            }
+            Services.EditorActions.MoveSelected(SharedModel.Instance.SelectedItems, 0, -SharedModel.Instance.MoveValue);
         }
 
         private void ButtonDown_Click(object sender, RoutedEventArgs e)
@@ -48,10 +45,7 @@ namespace InfoPanel.Views.Components
             //    displayItem.Y += SharedModel.Instance.MoveValue;
             //}
 
-            foreach (var item in SharedModel.Instance.SelectedItems)
-            {
-                item.Y += SharedModel.Instance.MoveValue;
-            }
+            Services.EditorActions.MoveSelected(SharedModel.Instance.SelectedItems, 0, SharedModel.Instance.MoveValue);
         }
 
         private void ButtonLeft_Click(object sender, RoutedEventArgs e)
@@ -61,10 +55,7 @@ namespace InfoPanel.Views.Components
             //    displayItem.X -= SharedModel.Instance.MoveValue;
             //}
 
-            foreach (var item in SharedModel.Instance.SelectedItems)
-            {
-                item.X -= SharedModel.Instance.MoveValue;
-            }
+            Services.EditorActions.MoveSelected(SharedModel.Instance.SelectedItems, -SharedModel.Instance.MoveValue, 0);
         }
 
         private void ButtonRight_Click(object sender, RoutedEventArgs e)
@@ -74,10 +65,7 @@ namespace InfoPanel.Views.Components
             //    displayItem.X += SharedModel.Instance.MoveValue;
             //}
 
-            foreach (var item in SharedModel.Instance.SelectedItems)
-            {
-                item.X += SharedModel.Instance.MoveValue;
-            }
+            Services.EditorActions.MoveSelected(SharedModel.Instance.SelectedItems, SharedModel.Instance.MoveValue, 0);
 
 
         }
@@ -113,11 +101,20 @@ namespace InfoPanel.Views.Components
                 numBox.Value = newValue;
                 if (SharedModel.Instance.SelectedItem is DisplayItem displayItem)
                 {
-                    displayItem.X = (int)newValue;
+                    // With several items selected, the box shows the first item's position and changing it
+                    // moves the whole selection by the same amount (it used to move only the first item).
+                    var dx = (int)newValue - displayItem.X;
+                    if (dx != 0)
+                    {
+                        if (SharedModel.Instance.IsMultipleItemsSelected)
+                            Services.EditorActions.MoveSelected(SharedModel.Instance.SelectedItems.Prepend(displayItem).Distinct(), dx, 0);
+                        else
+                            displayItem.X = (int)newValue; // single item: exact position, as before (even if locked)
+                    }
                 }
             }
          }
-                
+
         private void NumberBoxY_TextChanged(object sender, TextChangedEventArgs e)
         {
             var numBox = ((NumberBox)sender);
@@ -127,8 +124,39 @@ namespace InfoPanel.Views.Components
                 numBox.Value = newValue;
                 if (SharedModel.Instance.SelectedItem is DisplayItem displayItem)
                 {
-                    displayItem.Y = (int)newValue;
+                    var dy = (int)newValue - displayItem.Y;
+                    if (dy != 0)
+                    {
+                        if (SharedModel.Instance.IsMultipleItemsSelected)
+                            Services.EditorActions.MoveSelected(SharedModel.Instance.SelectedItems.Prepend(displayItem).Distinct(), 0, dy);
+                        else
+                            displayItem.Y = (int)newValue; // single item: exact position, as before (even if locked)
+                    }
                 }
+            }
+        }
+
+        private void ButtonStep_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement { Tag: string tag } && int.TryParse(tag, out var step))
+            {
+                SharedModel.Instance.MoveValue = step;
+            }
+        }
+
+        private void ButtonAlign_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement { Tag: string tag } && Enum.TryParse<Utils.AlignMode>(tag, out var mode))
+            {
+                Services.EditorActions.AlignSelected(mode);
+            }
+        }
+
+        private void ButtonDistribute_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement { Tag: string tag })
+            {
+                Services.EditorActions.DistributeSelected(horizontal: tag == "Horizontal");
             }
         }
     }

@@ -14,7 +14,7 @@
     MaxHeight="10000"
     Background="Transparent"
     DataContext="{Binding RelativeSource={RelativeSource self}}"
-    KeyUp="Window_KeyUp"
+    KeyDown="Window_KeyDown"
     MouseDown="Window_MouseDown"
     MouseMove="Window_MouseMove"
     MouseUp="Window_MouseUp"
