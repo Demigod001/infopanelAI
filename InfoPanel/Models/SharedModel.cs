@@ -190,9 +190,65 @@ namespace InfoPanel
             }
         }
 
+        /// <summary>
+        /// Text style settings that, when changed on the item shown in the properties panel, are copied to
+        /// every other selected text item. Lets several labels or values be restyled in one go.
+        /// </summary>
+        private static readonly HashSet<string> SharedTextStyleProperties =
+        [
+            nameof(TextDisplayItem.Font), nameof(TextDisplayItem.FontStyle), nameof(TextDisplayItem.FontSize),
+            nameof(TextDisplayItem.Bold), nameof(TextDisplayItem.Italic), nameof(TextDisplayItem.Underline),
+            nameof(TextDisplayItem.Strikeout), nameof(TextDisplayItem.Color), nameof(TextDisplayItem.Uppercase),
+            nameof(TextDisplayItem.RightAlign), nameof(TextDisplayItem.CenterAlign),
+            nameof(TextDisplayItem.GlowEnabled), nameof(TextDisplayItem.GlowRadius),
+            nameof(TextDisplayItem.GlowColor), nameof(TextDisplayItem.GlowBlendMode),
+        ];
+
+        private bool _propagatingStyle;
+
+        // The item whose settings the properties panel is showing, and when it started showing it.
+        private DisplayItem? _shownItem;
+        private DateTime _shownItemSettledUtc = DateTime.MinValue;
+
+        private void PropagateTextStyle(object? sender, string? propertyName)
+        {
+            if (_propagatingStyle || propertyName == null || sender is not TextDisplayItem source) return;
+            if (!SharedTextStyleProperties.Contains(propertyName)) return;
+
+            // Only changes made to the item whose settings are on screen are copied.
+            if (!ReferenceEquals(_shownItem, source)) return;
+
+            // When the panel first shows an item it may correct that item's font or style by itself
+            // (e.g. a missing font style). Ignore that brief settling period so selecting several items
+            // never changes them; only the user's own edits afterwards are copied.
+            if (DateTime.UtcNow < _shownItemSettledUtc) return;
+
+            var selected = SelectedItems;
+            if (selected.Count < 2) return;
+
+            var property = typeof(TextDisplayItem).GetProperty(propertyName);
+            if (property == null || !property.CanWrite) return;
+            var value = property.GetValue(source);
+
+            _propagatingStyle = true;
+            try
+            {
+                foreach (var target in selected.OfType<TextDisplayItem>())
+                {
+                    if (!ReferenceEquals(target, source))
+                        property.SetValue(target, value);
+                }
+            }
+            finally
+            {
+                _propagatingStyle = false;
+            }
+        }
+
         private void DisplayItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             if (_isUndoRedoInProgress || SelectedProfile is not Profile profile) return;
+            PropagateTextStyle(sender, e.PropertyName);
             var debouncer = _propertyChangeDebouncers.GetOrAdd(profile.Guid, _ => new Debouncer());
             debouncer.Debounce(() =>
             {
@@ -461,12 +517,54 @@ namespace InfoPanel
 
         public void NotifySelectedItemChange()
         {
+            var shown = SelectedItem;
+            if (!ReferenceEquals(shown, _shownItem))
+            {
+                _shownItem = shown;
+                _shownItemSettledUtc = DateTime.UtcNow.AddMilliseconds(750);
+            }
+
             OnPropertyChanged(nameof(SelectedItem));
             OnPropertyChanged(nameof(IsItemSelected));
             OnPropertyChanged(nameof(IsSingleItemSelected));
             OnPropertyChanged(nameof(IsSelectedItemMovable));
             OnPropertyChanged(nameof(IsSelectedItemsMovable));
+            OnPropertyChanged(nameof(IsMultipleItemsSelected));
+            OnPropertyChanged(nameof(CanAlignSelection));
+            OnPropertyChanged(nameof(CanDistributeSelection));
+            OnPropertyChanged(nameof(MultiSelectionSummary));
         }
+
+        public bool IsMultipleItemsSelected => SelectedItems.Count > 1;
+        public bool CanAlignSelection => Services.EditorActions.AlignableCount >= 2;
+        public bool CanDistributeSelection => Services.EditorActions.AlignableCount >= 3;
+
+        /// <summary>Shown above the properties when several items are selected.</summary>
+        public string MultiSelectionSummary
+        {
+            get
+            {
+                var items = SelectedItems;
+                if (items.Count < 2) return string.Empty;
+                var textCount = items.OfType<TextDisplayItem>().Count();
+                return textCount >= 2
+                    ? $"{items.Count} items selected. Text style changes below apply to all {textCount} text items. Moving and aligning applies to all."
+                    : $"{items.Count} items selected. Moving and aligning applies to all.";
+            }
+        }
+
+        // ---- Selection box drawn on the panel while box-selecting ----
+
+        private readonly ConcurrentDictionary<Guid, Utils.ItemRect> _selectionMarquees = new();
+
+        public void SetSelectionMarquee(Profile profile, Utils.ItemRect? rect)
+        {
+            if (rect is Utils.ItemRect r) _selectionMarquees[profile.Guid] = r;
+            else _selectionMarquees.TryRemove(profile.Guid, out _);
+        }
+
+        public Utils.ItemRect? GetSelectionMarquee(Profile profile) =>
+            _selectionMarquees.TryGetValue(profile.Guid, out var r) ? r : null;
 
         public ImmutableList<DisplayItem> SelectedItems
         {

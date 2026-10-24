@@ -19,6 +19,7 @@
     <Compile Include="..\InfoPanel\Utils\VersionComparison.cs" Link="VersionComparison.cs" />
     <Compile Include="..\InfoPanel\Models\SettingsCopy.cs" Link="SettingsCopy.cs" />
     <Compile Include="..\InfoPanel\ConnectorHealth\ConnectorHealthModel.cs" Link="ConnectorHealthModel.cs" />
+    <Compile Include="..\InfoPanel\Utils\LayoutMath.cs" Link="LayoutMath.cs" />
   </ItemGroup>
 
   <ItemGroup>
