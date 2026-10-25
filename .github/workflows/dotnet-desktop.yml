@@ -83,7 +83,10 @@ jobs:
     - name: Upload Release Asset
       if: startsWith(github.ref, 'refs/tags/')
       id: upload-release-asset
-      uses: ncipollo/release-action@v1
+      # Pinned to an exact commit (v1.21.0). A third-party action referenced by a movable tag could be
+      # changed by its author, or by someone who takes over their account, and it runs with permission
+      # to publish releases.
+      uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
       with:
         artifacts: "${{ github.workspace }}/InnoSetup/Output/InfoPanelSetup.exe,${{ github.workspace }}/InnoSetup/Output/InfoPanelSetup.exe.sha256"
         generateReleaseNotes: true

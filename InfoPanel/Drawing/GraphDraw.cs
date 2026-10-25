@@ -126,7 +126,11 @@ namespace InfoPanel.Drawing
             return result;
         }
 
-        public static void Run(ChartDisplayItem chartDisplayItem, SkiaGraphics g, bool preview = false)
+        /// <param name="clearBackground">
+        /// Clear the canvas first. Only valid when the canvas is dedicated to this chart; the panel now draws
+        /// charts directly onto its own canvas (clipped and transformed), so it passes false.
+        /// </param>
+        public static void Run(ChartDisplayItem chartDisplayItem, SkiaGraphics g, bool preview = false, bool clearBackground = true)
         {
             var elapsedMilliseconds = Stopwatch.ElapsedMilliseconds;
 
@@ -194,7 +198,10 @@ namespace InfoPanel.Drawing
             }
 
             {
-                g.Clear(SKColors.Transparent);
+                if (clearBackground)
+                {
+                    g.Clear(SKColors.Transparent);
+                }
 
                 var frameRect = new SKRect(0, 0, chartDisplayItem.Width, chartDisplayItem.Height);
 

@@ -1,6 +1,7 @@
 using InfoPanel;
 using Serilog;
 using System;
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -236,9 +237,20 @@ using System.Timers;
                             Logger.Information("HWiNFO sensor list changed for {Connection}; rebuilding headers", conn.RemoteIndex == -1 ? "Local" : $"Remote {conn.RemoteIndex}");
                             conn.HeaderDict.Clear();
                             BuildHeaders(conn);
+                            conn.LastPollTime = null;
                         }
 
-                        ReadSensors(conn);
+                        // HWiNFO stamps the header each time it refreshes its sensors (every 2 s by default,
+                        // while InfoPanel checks every 0.5 s). Re-reading unchanged data was most of the work,
+                        // so only read when the stamp has moved.
+                        // Safety net: read at least every 2.5 s even if the stamp never changes.
+                        var now = Environment.TickCount64;
+                        if (conn.LastPollTime != conn.MemRegion.PollTime || now - conn.LastReadTicks >= 2500)
+                        {
+                            ReadSensors(conn);
+                            conn.LastPollTime = conn.MemRegion.PollTime;
+                            conn.LastReadTicks = now;
+                        }
                     }
                     else
                     {
@@ -369,42 +381,97 @@ using System.Timers;
             }
         }
 
+        // Byte offsets of the fields in a HWiNFO reading entry (packed layout, ANSI strings).
+        private static readonly int OffsetIndex = (int)Marshal.OffsetOf<HWHASH_ELEMENT>(nameof(HWHASH_ELEMENT.Index));
+        private static readonly int OffsetId = (int)Marshal.OffsetOf<HWHASH_ELEMENT>(nameof(HWHASH_ELEMENT.ID));
+        private static readonly int OffsetValue = (int)Marshal.OffsetOf<HWHASH_ELEMENT>(nameof(HWHASH_ELEMENT.Value));
+        private static readonly int OffsetValueMin = (int)Marshal.OffsetOf<HWHASH_ELEMENT>(nameof(HWHASH_ELEMENT.ValueMin));
+        private static readonly int OffsetValueMax = (int)Marshal.OffsetOf<HWHASH_ELEMENT>(nameof(HWHASH_ELEMENT.ValueMax));
+        private static readonly int OffsetValueAvg = (int)Marshal.OffsetOf<HWHASH_ELEMENT>(nameof(HWHASH_ELEMENT.ValueAvg));
+        private static readonly int ElementMinimumSize = Marshal.SizeOf<HWHASH_ELEMENT>();
+
+        /// <summary>
+        /// Reads all sensor readings. Previously every reading was marshalled in full on every poll, creating
+        /// three new strings (two names and the unit) per reading and a new memory view each time. Now the
+        /// block is copied once into a reused buffer, and readings already known only have their four values
+        /// read; full marshalling (names, unit, type) happens only the first time a reading appears.
+        /// </summary>
         private static void ReadSensors(ShmConnection conn)
         {
+            if (conn.MemMap == null) return;
+
             if (conn.RemoteIndex == -1)
             {
                 MiniBenchmark(0);
                 SelfData.TotalEntries = conn.MemRegion.TOTAL_ReadingElements;
             }
 
-            var elementCount = conn.MemRegion.TOTAL_ReadingElements;
+            var elementCount = (int)conn.MemRegion.TOTAL_ReadingElements;
             var elementSize = (int)conn.MemRegion.SIZE_Reading;
-            var totalSize = elementCount * conn.MemRegion.SIZE_Reading;
+            if (elementCount <= 0 || elementSize < ElementMinimumSize) return;
 
-            using (MemoryMappedViewStream viewStream = conn.MemMap.CreateViewStream(
-                conn.MemRegion.OFFSET_Reading, totalSize, MemoryMappedFileAccess.Read))
+            var totalSize = checked(elementCount * elementSize);
+            if (conn.ReadBuffer == null || conn.ReadBuffer.Length < totalSize)
+                conn.ReadBuffer = new byte[totalSize];
+            var buffer = conn.ReadBuffer;
+
+            using (var view = conn.MemMap.CreateViewAccessor(conn.MemRegion.OFFSET_Reading, totalSize, MemoryMappedFileAccess.Read))
             {
-                byte[] buffer = new byte[elementSize];
+                view.ReadArray(0, buffer, 0, totalSize);
+            }
 
-                for (uint index = 0; index < elementCount; ++index)
+            for (int i = 0; i < elementCount; i++)
+            {
+                var entry = new ReadOnlySpan<byte>(buffer, i * elementSize, elementSize);
+                var index = BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(OffsetIndex));
+                var id = BinaryPrimitives.ReadUInt32LittleEndian(entry.Slice(OffsetId));
+
+                if (!conn.HeaderDict.TryGetValue(index, out var header)) continue;
+
+                var key = (conn.RemoteIndex, header.ID, header.Instance, id);
+                if (SENSORHASH.TryGetValue(key, out var existing))
                 {
-                    viewStream.Read(buffer, 0, elementSize);
-                    GCHandle gcHandle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
-                    try
-                    {
-                        HWHASH_ELEMENT structure = (HWHASH_ELEMENT)Marshal.PtrToStructure(gcHandle.AddrOfPinnedObject(), typeof(HWHASH_ELEMENT));
-                        FormatSensor(conn, structure);
-                    }
-                    finally
-                    {
-                        gcHandle.Free();
-                    }
+                    UpdateValues(key, existing,
+                        BinaryPrimitives.ReadDoubleLittleEndian(entry.Slice(OffsetValue)),
+                        BinaryPrimitives.ReadDoubleLittleEndian(entry.Slice(OffsetValueMin)),
+                        BinaryPrimitives.ReadDoubleLittleEndian(entry.Slice(OffsetValueMax)),
+                        BinaryPrimitives.ReadDoubleLittleEndian(entry.Slice(OffsetValueAvg)));
+                    continue;
+                }
+
+                // New reading: marshal it in full once to get its names, unit and type.
+                var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+                try
+                {
+                    var structure = Marshal.PtrToStructure<HWHASH_ELEMENT>(handle.AddrOfPinnedObject() + i * elementSize);
+                    FormatSensor(conn, structure);
+                }
+                finally
+                {
+                    handle.Free();
                 }
             }
 
             if (conn.RemoteIndex == -1)
             {
                 MiniBenchmark(1);
+            }
+        }
+
+        private static void UpdateValues((int, uint, uint, uint) key, HWINFO_HASH existing, double value, double min, double max, double avg)
+        {
+            existing.ValuePrev = existing.ValueNow;
+            existing.ValueNow = value;
+            existing.ValueMin = min;
+            existing.ValueMax = max;
+            existing.ValueAvg = avg;
+            SENSORHASH[key] = existing;
+
+            if (SENSORHASH_MINI.TryGetValue(key, out var mini))
+            {
+                mini.ValuePrev = mini.ValueNow;
+                mini.ValueNow = value;
+                SENSORHASH_MINI[key] = mini;
             }
         }
 
@@ -693,6 +760,9 @@ using System.Timers;
             public HWINFO_MEM MemRegion;
             public Dictionary<uint, HWHASH_HEADER> HeaderDict = new();
             public bool IsAlive;
+            public long? LastPollTime;
+            public long LastReadTicks;
+            public byte[]? ReadBuffer;
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]

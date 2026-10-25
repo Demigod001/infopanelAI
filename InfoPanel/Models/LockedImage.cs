@@ -683,29 +683,22 @@ namespace InfoPanel.Models
             // large-object-heap allocation per frame for the garbage collector to clean up).
             if (bitmapSource is WriteableBitmap writeable && writeable.Format == System.Windows.Media.PixelFormats.Bgra32)
             {
-                // BackBuffer is only valid between Lock and Unlock. Reading it unlocked is an
-                // access violation, which kills the process before the managed crash handler runs.
-                try
-                {
-                    writeable.Lock();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Debug(ex, "WriteableBitmap.Lock failed; copying pixels the slow way");
+                // The video player freezes the bitmap before returning it. A frozen WriteableBitmap is
+                // read-only: Lock() always throws on it, so locking sent every frame down the slow path
+                // through an exception. Nothing else writes to a frozen bitmap, so reading BackBuffer
+                // without Lock is safe as long as the bitmap stays alive.
+                //
+                // That last part was the real crash risk: once BackBuffer has been read, the JIT may treat
+                // `writeable` as unused, and the GC can collect it (its finalizer frees the pixel memory)
+                // while FromPixelCopy is still reading. GC.KeepAlive pins its lifetime past the copy.
+                var backBuffer = writeable.BackBuffer;
+                var stride = writeable.BackBufferStride;
+                if (backBuffer == IntPtr.Zero || stride <= 0)
                     return ConvertBitmapSourceToSKImageSlow(bitmapSource, info);
-                }
 
-                try
-                {
-                    if (writeable.BackBuffer == IntPtr.Zero || writeable.BackBufferStride <= 0)
-                        return ConvertBitmapSourceToSKImageSlow(bitmapSource, info);
-
-                    return SKImage.FromPixelCopy(info, writeable.BackBuffer, writeable.BackBufferStride);
-                }
-                finally
-                {
-                    writeable.Unlock();
-                }
+                var image = SKImage.FromPixelCopy(info, backBuffer, stride);
+                GC.KeepAlive(writeable);
+                return image;
             }
 
             return ConvertBitmapSourceToSKImageSlow(bitmapSource, info);
