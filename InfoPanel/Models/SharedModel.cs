@@ -205,23 +205,41 @@ namespace InfoPanel
         ];
 
         private bool _propagatingStyle;
+        private int _stylePropagationSuppressed;
 
-        // The item whose settings the properties panel is showing, and when it started showing it.
+        // The item whose settings the properties panel is showing.
         private DisplayItem? _shownItem;
-        private DateTime _shownItemSettledUtc = DateTime.MinValue;
+
+        /// <summary>
+        /// Changes made inside this scope are not copied to other selected items. The text properties panel
+        /// uses it around its own automatic corrections (e.g. picking a valid font style when it shows an
+        /// item), so only the user's edits are copied. This replaces a 750 ms "settling" window, which could
+        /// also drop real edits made quickly after selecting.
+        /// </summary>
+        public IDisposable SuppressStylePropagation()
+        {
+            _stylePropagationSuppressed++;
+            return new ScopeExit(() => _stylePropagationSuppressed--);
+        }
+
+        private sealed class ScopeExit(Action onExit) : IDisposable
+        {
+            private Action? _onExit = onExit;
+            public void Dispose()
+            {
+                _onExit?.Invoke();
+                _onExit = null;
+            }
+        }
 
         private void PropagateTextStyle(object? sender, string? propertyName)
         {
-            if (_propagatingStyle || propertyName == null || sender is not TextDisplayItem source) return;
+            if (_propagatingStyle || _stylePropagationSuppressed > 0) return;
+            if (propertyName == null || sender is not TextDisplayItem source) return;
             if (!SharedTextStyleProperties.Contains(propertyName)) return;
 
             // Only changes made to the item whose settings are on screen are copied.
             if (!ReferenceEquals(_shownItem, source)) return;
-
-            // When the panel first shows an item it may correct that item's font or style by itself
-            // (e.g. a missing font style). Ignore that brief settling period so selecting several items
-            // never changes them; only the user's own edits afterwards are copied.
-            if (DateTime.UtcNow < _shownItemSettledUtc) return;
 
             var selected = SelectedItems;
             if (selected.Count < 2) return;
@@ -229,15 +247,32 @@ namespace InfoPanel
             var property = typeof(TextDisplayItem).GetProperty(propertyName);
             if (property == null || !property.CanWrite) return;
             var value = property.GetValue(source);
+            var targets = selected.OfType<TextDisplayItem>().Where(t => !ReferenceEquals(t, source)).ToList();
 
+            CopyToTargets(targets, property, value);
+
+            // Changing the font makes the properties panel choose a valid style for the new font (inside a
+            // suppressed scope). Copy that resolved style once the panel has done so, so every selected item
+            // ends up with the same font and a style that exists for it.
+            if (propertyName == nameof(TextDisplayItem.Font) && value is string font)
+            {
+                Application.Current?.Dispatcher?.BeginInvoke(() =>
+                {
+                    if (source.Font != font) return;
+                    var styleTargets = targets.Where(t => t.Font == font).ToList();
+                    var styleProperty = typeof(TextDisplayItem).GetProperty(nameof(TextDisplayItem.FontStyle))!;
+                    CopyToTargets(styleTargets, styleProperty, source.FontStyle);
+                }, DispatcherPriority.Background);
+            }
+        }
+
+        private void CopyToTargets(List<TextDisplayItem> targets, System.Reflection.PropertyInfo property, object? value)
+        {
             _propagatingStyle = true;
             try
             {
-                foreach (var target in selected.OfType<TextDisplayItem>())
-                {
-                    if (!ReferenceEquals(target, source))
-                        property.SetValue(target, value);
-                }
+                foreach (var target in targets)
+                    property.SetValue(target, value);
             }
             finally
             {
@@ -517,12 +552,7 @@ namespace InfoPanel
 
         public void NotifySelectedItemChange()
         {
-            var shown = SelectedItem;
-            if (!ReferenceEquals(shown, _shownItem))
-            {
-                _shownItem = shown;
-                _shownItemSettledUtc = DateTime.UtcNow.AddMilliseconds(750);
-            }
+            _shownItem = SelectedItem;
 
             OnPropertyChanged(nameof(SelectedItem));
             OnPropertyChanged(nameof(IsItemSelected));
@@ -530,12 +560,20 @@ namespace InfoPanel
             OnPropertyChanged(nameof(IsSelectedItemMovable));
             OnPropertyChanged(nameof(IsSelectedItemsMovable));
             OnPropertyChanged(nameof(IsMultipleItemsSelected));
+            OnPropertyChanged(nameof(PositionItem));
             OnPropertyChanged(nameof(CanAlignSelection));
             OnPropertyChanged(nameof(CanDistributeSelection));
             OnPropertyChanged(nameof(MultiSelectionSummary));
         }
 
         public bool IsMultipleItemsSelected => SelectedItems.Count > 1;
+
+        /// <summary>
+        /// The item whose position the X/Y boxes show and edit: the first selected item that is not a group.
+        /// A group's own X/Y is not where it is drawn, so showing it (and moving the selection relative to
+        /// it) gave misleading numbers.
+        /// </summary>
+        public DisplayItem? PositionItem => SelectedItems.FirstOrDefault(item => item is not GroupDisplayItem);
         public bool CanAlignSelection => Services.EditorActions.AlignableCount >= 2;
         public bool CanDistributeSelection => Services.EditorActions.AlignableCount >= 3;
 

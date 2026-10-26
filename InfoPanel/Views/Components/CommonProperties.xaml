@@ -79,7 +79,7 @@
                     FontSize="12"
                     MaxDecimalPlaces="1"
                     SmallChange="{Binding Source={x:Static app:SharedModel.Instance}, Path=MoveValue}"
-                    Text="{Binding Source={x:Static app:SharedModel.Instance}, Path=SelectedItem.X}"
+                    Text="{Binding Source={x:Static app:SharedModel.Instance}, Path=PositionItem.X}"
                     TextChanged="NumberBoxX_TextChanged" />
                 <TextBlock
                     Margin="5,0,0,0"
@@ -92,7 +92,7 @@
                     FontSize="12"
                     MaxDecimalPlaces="1"
                     SmallChange="{Binding Source={x:Static app:SharedModel.Instance}, Path=MoveValue}"
-                    Text="{Binding Source={x:Static app:SharedModel.Instance}, Path=SelectedItem.Y}"
+                    Text="{Binding Source={x:Static app:SharedModel.Instance}, Path=PositionItem.Y}"
                     TextChanged="NumberBoxY_TextChanged" />
                 <TextBlock
                     Margin="5,0,0,0"

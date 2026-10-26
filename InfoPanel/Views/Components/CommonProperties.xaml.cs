@@ -99,7 +99,7 @@ namespace InfoPanel.Views.Components
             if (double.TryParse(numBox.Text, out newValue))
             {
                 numBox.Value = newValue;
-                if (SharedModel.Instance.SelectedItem is DisplayItem displayItem)
+                if (SharedModel.Instance.PositionItem is DisplayItem displayItem)
                 {
                     // With several items selected, the box shows the first item's position and changing it
                     // moves the whole selection by the same amount (it used to move only the first item).
@@ -122,7 +122,7 @@ namespace InfoPanel.Views.Components
             if (double.TryParse(numBox.Text, out newValue))
             {
                 numBox.Value = newValue;
-                if (SharedModel.Instance.SelectedItem is DisplayItem displayItem)
+                if (SharedModel.Instance.PositionItem is DisplayItem displayItem)
                 {
                     var dy = (int)newValue - displayItem.Y;
                     if (dy != 0)
