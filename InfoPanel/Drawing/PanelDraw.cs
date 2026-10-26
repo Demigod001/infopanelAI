@@ -390,19 +390,46 @@ namespace InfoPanel.Drawing
                         var width = scale == 1 ? (int)chartDisplayItem.Width : (int)Math.Floor(chartDisplayItem.Width * scale);
                         var height = scale == 1 ? (int)chartDisplayItem.Height : (int)Math.Floor(chartDisplayItem.Height * scale);
 
-                        using var graphBitmap = new SKBitmap(chartDisplayItem.Width, chartDisplayItem.Height);
-                        using var canvas = new SKCanvas(graphBitmap);
-
-                        using var g1 = new SkiaGraphics(canvas, g.FontScale);
-                        GraphDraw.Run(chartDisplayItem, g1, preview);
-
-                        if (chartDisplayItem.FlipX)
+                        var chartWidth = chartDisplayItem.Width;
+                        var chartHeight = chartDisplayItem.Height;
+                        if (chartWidth <= 0 || chartHeight <= 0 || width <= 0 || height <= 0)
                         {
-                            g.DrawBitmap(graphBitmap, x, y, width, height, rotation: chartDisplayItem.Rotation, flipX: true);
+                            break;
                         }
-                        else
+
+                        // Draw the chart straight onto the panel. It used to be drawn into a new bitmap every
+                        // frame, copied into an image, then drawn: two full-size allocations and copies per chart
+                        // per frame. The transform matches the old DrawBitmap path: flip, then rotate, both about
+                        // the item's centre, then scale the chart's own size to the drawn size.
+                        var canvas = g.Canvas;
+                        canvas.Save();
+                        try
                         {
-                            g.DrawBitmap(graphBitmap, x, y, width, height, rotation: chartDisplayItem.Rotation);
+                            var centerX = x + width / 2;
+                            var centerY = y + height / 2;
+
+                            if (chartDisplayItem.FlipX)
+                            {
+                                canvas.Scale(-1, 1, centerX, centerY);
+                            }
+
+                            if (chartDisplayItem.Rotation != 0)
+                            {
+                                canvas.RotateDegrees(chartDisplayItem.Rotation, centerX, centerY);
+                            }
+
+                            canvas.Translate(x, y);
+                            if (width != chartWidth || height != chartHeight)
+                            {
+                                canvas.Scale((float)width / chartWidth, (float)height / chartHeight);
+                            }
+
+                            canvas.ClipRect(new SKRect(0, 0, chartWidth, chartHeight));
+                            GraphDraw.Run(chartDisplayItem, g, preview, clearBackground: false);
+                        }
+                        finally
+                        {
+                            canvas.Restore();
                         }
 
                         break;

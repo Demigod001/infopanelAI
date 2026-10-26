@@ -268,6 +268,12 @@ namespace InfoPanel.Views.Pages
                         throw new InvalidOperationException("This release has no checksum file, so it cannot be verified.");
                     }
 
+                    // Only download from this fork's own GitHub release files, whatever the release data says.
+                    if (!IsTrustedReleaseUrl(url) || !IsTrustedReleaseUrl(checksumUrl))
+                    {
+                        throw new InvalidOperationException("The update download address is not this project's GitHub release, so it was not used.");
+                    }
+
                     var expectedHash = await DownloadExpectedSha256Async(checksumUrl, cts.Token);
 
                     using var stream = await DownloadStreamWithProgressAsync(url, cts.Token, progressReporter);
@@ -287,10 +293,24 @@ namespace InfoPanel.Views.Pages
 
                     SaveStreamToFile(stream, filePath);
 
-                    // UseShellExecute so Windows can show the UAC prompt the installer needs.
-                    // .NET defaults this to false, and CreateProcess cannot start an exe that
-                    // requires elevation (ERROR_ELEVATION_REQUIRED), so the update silently did nothing.
-                    Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });
+                    // Reopen the saved file so no other program can change or replace it, check it again,
+                    // and keep it open while it starts. Otherwise another program could swap the file
+                    // between the checksum check and the launch, and the user would approve that file at
+                    // the administrator prompt.
+                    using (var saved = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    {
+                        var savedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(saved));
+                        if (!string.Equals(savedHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidOperationException("The saved installer changed after it was checked, so it was not run.");
+                        }
+
+                        // UseShellExecute so Windows can show the UAC prompt the installer needs.
+                        // .NET defaults this to false, and CreateProcess cannot start an exe that
+                        // requires elevation (ERROR_ELEVATION_REQUIRED), so the update silently did nothing.
+                        Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });
+                    }
+
                     Environment.Exit(0);
                 }
                 catch (Exception ex)
@@ -303,6 +323,19 @@ namespace InfoPanel.Views.Pages
 
                 ViewModel.DownloadInProgress = false;
             }
+        }
+
+        /// <summary>
+        /// Release files must be HTTPS links to this fork's GitHub releases
+        /// (https://github.com/{owner}/{repo}/releases/download/...). GitHub then redirects to its own file host.
+        /// </summary>
+        internal static bool IsTrustedReleaseUrl(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+            if (uri.Scheme != Uri.UriSchemeHttps) return false;
+            if (!string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)) return false;
+            var prefix = $"/{UpdateChecker.UpdateRepository}/releases/download/";
+            return uri.AbsolutePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

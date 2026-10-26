@@ -20,7 +20,10 @@ namespace InfoPanel.Drawing
     /// </summary>
     internal static class TextLayoutCache
     {
-        private const int GenerationCapacity = 2048;
+        // Measured at about 2.8 KB per short laid-out string, so two generations of 512 cap the cache at
+        // roughly 3 MB. Live sensor values are only needed for about a second, while labels drawn every
+        // frame are promoted back into the current generation and stay cached.
+        private const int GenerationCapacity = 512;
 
         private static readonly object _lock = new();
         private static Dictionary<Key, TextBlock> _current = new(GenerationCapacity);
