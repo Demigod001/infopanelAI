@@ -92,6 +92,9 @@ namespace InfoPanel.Views.Components
 
         private static void OnCurrentFontChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
+            // Corrections made here (normalising the font name, choosing a style that exists for the
+            // font) are automatic, not the user's edits, so they must not be copied to other selected items.
+            using var _ = SharedModel.Instance.SuppressStylePropagation();
             Logger.Debug("OnCurrentFontChanged newValue: {NewValue}", e.NewValue);
             var control = (TextProperties)d;
             var item = (TextDisplayItem)control.GetValue(ItemProperty);
@@ -170,6 +173,9 @@ namespace InfoPanel.Views.Components
 
         private static void OnCurrentFontStyleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
+            // Corrections made here (normalising the font name, choosing a style that exists for the
+            // font) are automatic, not the user's edits, so they must not be copied to other selected items.
+            using var _ = SharedModel.Instance.SuppressStylePropagation();
             Logger.Debug("OnCurrentFontStyleChanged newValue: {NewValue}", e.NewValue);
             var control = (TextProperties)d;
             var item = (TextDisplayItem)control.GetValue(ItemProperty);

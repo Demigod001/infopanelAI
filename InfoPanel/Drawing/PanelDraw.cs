@@ -82,8 +82,24 @@ namespace InfoPanel.Drawing
                     // Determine if we are in the "on" phase
                     if (elapsedMilliseconds % cycleDuration < onDuration) // "on" phase
                     {
+                        // One paint for all outlines this frame. Unrotated outlines (the usual case) are drawn
+                        // as plain rectangles clipped to the panel, with no path built per item per frame;
+                        // rotated ones still go through RectToPath.
+                        using var outlinePaint = new SKPaint { Color = color, StrokeWidth = 2, IsAntialias = true, Style = SKPaintStyle.Stroke };
+                        var panelBounds = new SKRect(1, 1, profile.Width - 1, profile.Height - 1);
+
                         foreach (var rectangle in selectedRectangles)
                         {
+                            if (rectangle.Rotation == 0)
+                            {
+                                var visible = SKRect.Intersect(rectangle.Rect, panelBounds);
+                                if (!visible.IsEmpty)
+                                {
+                                    g.Canvas.DrawRect(visible, outlinePaint);
+                                }
+                                continue;
+                            }
+
                             using var path = RectToPath(rectangle.Rect, rectangle.Rotation, profile.Width, profile.Height, 2);
 
                             if (path != null)
