@@ -35,6 +35,13 @@ namespace InfoPanel.Models
         [ObservableProperty]
         private bool _minimizeToTray = true;
 
+        /// <summary>
+        /// Hide panel windows while the PC is being used through Remote Desktop. A remote session has only
+        /// the remote screen, so panels for other monitors would otherwise be moved on top of it.
+        /// </summary>
+        [ObservableProperty]
+        private bool _hideDisplaysInRemoteSession = true;
+
         [ObservableProperty]
         private bool _closeToMinimize = false;
 
