@@ -77,6 +77,7 @@ namespace InfoPanel.Views.Common
             ConfigModel.Instance.Settings.PropertyChanged += Config_PropertyChanged;
 
             SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
+            SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
 
             DpiChanged += DisplayWindow_DpiChanged;
             LocationChanged += DisplayWindow_LocationChanged;
@@ -181,6 +182,7 @@ namespace InfoPanel.Views.Common
 
             Profile.PropertyChanged -= Profile_PropertyChanged;
             SystemEvents.DisplaySettingsChanged -= SystemEvents_DisplaySettingsChanged;
+            SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
 
             DpiChanged -= DisplayWindow_DpiChanged;
             LocationChanged -= DisplayWindow_LocationChanged;
@@ -382,6 +384,7 @@ namespace InfoPanel.Views.Common
 
         private void OnTimerElapsed(object? sender, ElapsedEventArgs e)
         {
+            if (_hiddenForRemoteSession) return;
             if (_renderInvalidationPending) return;
             _renderInvalidationPending = true;
 
@@ -488,8 +491,8 @@ namespace InfoPanel.Views.Common
                 container?.Children.Add(newElement);
                 _skGlElement = newElement;
 
-                // Restore visibility if we were hidden during retry
-                if (!IsVisible) Show();
+                // Restore visibility if we were hidden during retry (but not during a remote session)
+                if (!IsVisible && !_hiddenForRemoteSession && !_hiddenNoScreen) Show();
             }
             catch (OpenTK.Windowing.GraphicsLibraryFramework.GLFWException ex)
             {
@@ -532,12 +535,94 @@ namespace InfoPanel.Views.Common
             Logger.Information("SystemEvents_DisplaySettingsChanged");
             _dispatcher.BeginInvoke(() =>
             {
+                if (UpdateRemoteSessionState())
+                {
+                    return; // hidden for a remote session; nothing to place or recreate
+                }
+
                 if (OpenGL)
                 {
                     RecreateGLElement();
                 }
                 SetWindowPositionRelativeToScreen();
             });
+        }
+
+        // ---- Remote Desktop handling ----
+        //
+        // A Remote Desktop session has only the remote screen. Without this, the panel could not find its
+        // monitor, fell back to the first screen (the remote one) and, being always on top, sized to the
+        // panel and hidden from Alt+Tab, covered the remote desktop including the taskbar and tray icon.
+
+        private const int SM_REMOTESESSION = 0x1000;
+
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
+
+        private bool _hiddenForRemoteSession;
+
+        // Hidden because strict monitor matching found no matching screen.
+        private bool _hiddenNoScreen;
+
+        private static bool IsRemoteSession()
+        {
+            try
+            {
+                return GetSystemMetrics(SM_REMOTESESSION) != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void SystemEvents_SessionSwitch(object sender, SessionSwitchEventArgs e)
+        {
+            Logger.Information("Session switch: {Reason}", e.Reason);
+            _dispatcher.BeginInvoke(() =>
+            {
+                var wasHidden = _hiddenForRemoteSession;
+                if (UpdateRemoteSessionState() || !wasHidden)
+                {
+                    return;
+                }
+
+                // Back on the PC itself: rebuild the GL surface for the real displays and put the window back.
+                if (OpenGL)
+                {
+                    RecreateGLElement();
+                }
+                SetWindowPositionRelativeToScreen();
+            });
+        }
+
+        /// <summary>
+        /// Hides the window during a Remote Desktop session (if enabled) and shows it again afterwards.
+        /// Returns true while the window is hidden for a remote session. Must run on the window's dispatcher.
+        /// </summary>
+        private bool UpdateRemoteSessionState()
+        {
+            var hide = ConfigModel.Instance.Settings.HideDisplaysInRemoteSession && IsRemoteSession();
+
+            if (hide)
+            {
+                if (!_hiddenForRemoteSession)
+                {
+                    Logger.Information("Remote Desktop session detected; hiding panel window for {Profile}", Profile.Name);
+                }
+                _hiddenForRemoteSession = true;
+                if (IsVisible) Hide();
+                return true;
+            }
+
+            if (_hiddenForRemoteSession)
+            {
+                Logger.Information("Remote Desktop session ended; restoring panel window for {Profile}", Profile.Name);
+                _hiddenForRemoteSession = false;
+                if (!IsVisible && !_hiddenNoScreen) Show();
+            }
+
+            return false;
         }
 
         public void Fullscreen()
@@ -560,6 +645,17 @@ namespace InfoPanel.Views.Common
             if (e.PropertyName == nameof(ConfigModel.Instance.Settings.TargetFrameRate))
             {
                 UpdateSkiaTimer();
+            }
+            else if (e.PropertyName == nameof(ConfigModel.Instance.Settings.HideDisplaysInRemoteSession))
+            {
+                _dispatcher.BeginInvoke(() =>
+                {
+                    var wasHidden = _hiddenForRemoteSession;
+                    if (!UpdateRemoteSessionState() && wasHidden)
+                    {
+                        SetWindowPositionRelativeToScreen();
+                    }
+                });
             }
         }
 
@@ -731,6 +827,11 @@ namespace InfoPanel.Views.Common
 
         private void SetWindowPositionRelativeToScreenCore()
         {
+            if (UpdateRemoteSessionState())
+            {
+                return;
+            }
+
             var screens = ScreenHelper.GetAllMonitors();
             MonitorInfo? targetScreen = null;
 
@@ -758,9 +859,18 @@ namespace InfoPanel.Views.Common
                 Logger.Debug("SetWindowPositionRelativeToScreen targetScreen={TargetScreen}", targetScreen);
                 Logger.Debug("SetWindowPositionRelativeToScreen targetScreen={DeviceName} x={X} y={Y}", targetScreen.DeviceName, x, y);
                 ScreenHelper.MoveWindowPhysical(this, (int)x, (int)y);
+
+                // Its monitor is back after being missing (strict matching): show the window again.
+                // Previously it stayed hidden until the profile was toggled off and on.
+                if (_hiddenNoScreen)
+                {
+                    _hiddenNoScreen = false;
+                    if (!IsVisible) Show();
+                }
             }
             else if (this.IsVisible)
             {
+                _hiddenNoScreen = true;
                 this.Hide();
             }
         }
