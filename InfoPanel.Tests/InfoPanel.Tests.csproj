@@ -20,6 +20,7 @@
     <Compile Include="..\InfoPanel\Models\SettingsCopy.cs" Link="SettingsCopy.cs" />
     <Compile Include="..\InfoPanel\ConnectorHealth\ConnectorHealthModel.cs" Link="ConnectorHealthModel.cs" />
     <Compile Include="..\InfoPanel\Utils\LayoutMath.cs" Link="LayoutMath.cs" />
+    <Compile Include="..\InfoPanel\Utils\HwInfoMatching.cs" Link="HwInfoMatching.cs" />
   </ItemGroup>
 
   <ItemGroup>

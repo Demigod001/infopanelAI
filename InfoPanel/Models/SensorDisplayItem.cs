@@ -289,7 +289,7 @@ namespace InfoPanel.Models
         {
             return SensorType switch
             {
-                Enums.SensorType.HwInfo => SensorReader.ReadHwInfoSensor(HwInfoRemoteIndex, Id, Instance, EntryId),
+                Enums.SensorType.HwInfo => HwInfoSensorResolver.Read(this),
                 Enums.SensorType.Libre => SensorReader.ReadLibreSensor(LibreSensorId),
                 Enums.SensorType.Plugin => SensorReader.ReadPluginSensor(PluginSensorId),
                 _ => null,
